@@ -148,6 +148,8 @@ podman exec gsm-sip-bridge gsm-sip-bridge --config /etc/gsm-sip-bridge/config.to
 
 ## Running gsm-sip-bridge natively (no podman)
 
+The full step-by-step setup is in [docs/native-gsm-sip-bridge-runbook.md](docs/native-gsm-sip-bridge-runbook.md). Summary:
+
 Stopping the gsm-sip-bridge container repeatedly crashed the stick's kernel
 (see the kernel-issue draft), so `deploy/native/` runs it as plain processes
 from the image's unpacked root filesystem instead:
