@@ -145,3 +145,47 @@ cd /apps/gsm-sip-bridge
 DOCKER_HOST=unix:///run/podman/podman.sock docker-compose up -d
 podman exec gsm-sip-bridge gsm-sip-bridge --config /etc/gsm-sip-bridge/config.toml vowifi-status
 ```
+
+## Running gsm-sip-bridge natively (no podman)
+
+Stopping the gsm-sip-bridge container repeatedly crashed the stick's kernel
+(see the kernel-issue draft), so `deploy/native/` runs it as plain processes
+from the image's unpacked root filesystem instead:
+
+```sh
+C=$(podman create ghcr.io/selvakn/gsm-sip-bridge:8.22.0)
+podman export $C | tar -x -C /overlay/gsm-sip-bridge-root && podman rm $C
+scp -O deploy/native/gsm-sip-bridge.init root@stick:/etc/init.d/gsm-sip-bridge
+scp -O deploy/native/run-native         root@stick:/apps/gsm-sip-bridge/run-native
+scp -O deploy/native/config.toml        root@stick:/apps/gsm-sip-bridge/config.toml   # db_path under /apps
+/etc/init.d/podman-apps disable; /etc/init.d/gsm-sip-bridge enable; /etc/init.d/gsm-sip-bridge start
+logread -e run-native
+```
+
+What the init script does on start (all idempotent):
+
+- Symlinks the absolute paths the binary hard-codes into the unpacked tree:
+  `/usr/libexec/ipsec`, `/usr/lib/ipsec`, `/usr/lib/pcsc`, `swanctl`, `pcscd`, `/etc/strongswan.d`,
+  `/etc/strongswan.conf`, `/etc/swanctl`, `/etc/reader.conf.d`, `/etc/gsm-sip-bridge` and
+  `/usr/local/bin/gsm-sip-bridge`. None of these exist on OpenWrt.
+- Rewrites the image's absolute symlinks to point inside the tree. Otherwise
+  `timeout -> /bin/busybox` resolves to the host busybox, which has no `timeout`
+  applet, and supervise misreads that as `swanctl --list-sas ... vici connection
+  broken`, re-initiating the tunnel in a loop.
+- Patches `ims.updown`. charon runs it without our `PATH`, so its
+  `ip netns exec … ip addr add` failed silently. The tunnel address never
+  appeared, and IMS REGISTER got "Host is unreachable". The script now pins the
+  image's userland and logs `ip` errors (`logread -e ims.updown`).
+- Adds `/usr/bin/ip -> /sbin/ip` for `ip netns exec` run with an empty `PATH`.
+- Bind-mounts `fake-usb/` read-only over `/sys/bus/usb/devices`. It's empty on the
+  stick, because the stick is a USB gadget and not a host.
+
+`run-native` runs `prestart`, loads `.env`, puts the unpacked tree first on
+`PATH` and `LD_LIBRARY_PATH` (both sides use musl 1.2.5), and execs
+`gsm-sip-bridge supervise`. Status:
+
+```sh
+set -a; . /apps/gsm-sip-bridge/.env; set +a
+LD_LIBRARY_PATH=/overlay/gsm-sip-bridge-root/usr/lib /overlay/gsm-sip-bridge-root/usr/local/bin/gsm-sip-bridge \
+  --config /apps/gsm-sip-bridge/config.toml vowifi-status
+```

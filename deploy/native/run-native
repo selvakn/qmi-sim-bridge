@@ -1,0 +1,20 @@
+#!/bin/sh
+# Launched by /etc/init.d/gsm-sip-bridge. Waits for the SIM, then runs
+# `gsm-sip-bridge supervise` with the unpacked image's tools and libraries
+# first on PATH / LD_LIBRARY_PATH, so every child (charon, swanctl, pcscd,
+# ip, sh) comes from the same Alpine userland it was built for.
+
+: "${ROOT:=/overlay/gsm-sip-bridge-root}"
+: "${APP:=/apps/gsm-sip-bridge}"
+cd "$APP" || exit 1
+
+[ -x ./prestart ] && ./prestart
+
+set -a
+. ./.env
+set +a
+
+export PATH="$ROOT/usr/local/bin:$ROOT/usr/sbin:$ROOT/usr/bin:$ROOT/sbin:$ROOT/bin:$PATH"
+export LD_LIBRARY_PATH="$ROOT/usr/lib:$ROOT/lib"
+
+exec "$ROOT/usr/local/bin/gsm-sip-bridge" --config "$APP/config.toml" supervise
