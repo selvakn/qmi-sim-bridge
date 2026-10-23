@@ -19,9 +19,9 @@ Commands from the pty are forwarded to the real AT port (default
 | Command | Handling |
 |---|---|
 | `AT+CSIM=<n>,"<apdu>"` | Sent as QMI UIM *Send APDU* on a logical channel to the USIM. CLA is rewritten to that channel and `61xx` is followed with GET RESPONSE. |
-| SELECT by AID of the USIM (`00A404..`) | The modem refuses application selection through raw APDUs (QMI error 82). The bridge reopens the logical channel, which selects the USIM, and answers `9000` (or FCP + `9000`). |
+| SELECT by AID of the USIM (`00A404..`) | The modem refuses application selection through raw APDUs (QMI error 82). The first one opens the logical channel, which selects the USIM, and is answered `9000` (or FCP + `9000`). Later ones are sent as SELECT `7FFF` (the current-ADF alias) on the open channel. Reopening the channel makes the modem announce SIM changes. |
 | `AT+QCFG="ims"` | Answers `+QCFG: "ims",2,0`: the modem has no IMS stack, so "disabled" is the truth. A set is acknowledged and ignored. |
-| `AT+CFUN=<n>` | Not forwarded, because it would drop the radio and the LTE data link. The bridge resets the SIM session (closes and reopens the channel) and returns `OK`. |
+| `AT+CFUN=<n>` | Not forwarded, because it would drop the radio and the LTE data link. Answered `OK`. |
 | `AT+CGSN` | Sent as `AT+GSN`. The HIMI_U01 firmware answers `AT+CGSN` with the IMEI but never sends the final `OK`, so callers time out. |
 | `ATE0` / `ATE1` | Forwarded, and tracked so that locally answered commands are echoed consistently. |
 

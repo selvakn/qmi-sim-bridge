@@ -112,16 +112,25 @@ impl<T: Transport> Session<T> {
     }
 
     fn transmit_once(&mut self, apdu: &[u8]) -> Result<Vec<u8>, QmiError> {
-        // The modem refuses to SELECT an application through a raw APDU
-        // (it owns application selection). A freshly opened channel has
-        // exactly that application selected, so reopen and answer locally.
-        if self.selects_session_aid(apdu) {
-            self.reset();
-            self.channel()?;
-            let mut r = if apdu[3] & 0x0C == 0x0C { Vec::new() } else { self.fcp.clone() };
-            r.extend_from_slice(&[0x90, 0x00]);
-            return Ok(r);
-        }
+        // The modem refuses to SELECT an application by AID through a raw
+        // APDU (it owns application selection). A freshly opened channel has
+        // exactly that application selected; on an established one, select
+        // it again by its FID alias 7FFF ("current ADF"). Reopening the
+        // channel instead makes the modem announce SIM changes, which
+        // ModemManager may treat as a SIM swap.
+        let alias;
+        let apdu = if self.selects_session_aid(apdu) {
+            if self.channel.is_none() {
+                self.channel()?;
+                let mut r = if apdu[3] & 0x0C == 0x0C { Vec::new() } else { self.fcp.clone() };
+                r.extend_from_slice(&[0x90, 0x00]);
+                return Ok(r);
+            }
+            alias = [apdu[0], 0xA4, 0x00, apdu[3], 0x02, 0x7F, 0xFF];
+            &alias[..]
+        } else {
+            apdu
+        };
         let ch = self.channel()?;
         let mut cmd = apdu.to_vec();
         cmd[0] = cla_for_channel(apdu[0], ch);
@@ -226,20 +235,25 @@ mod tests {
     }
 
     #[test]
-    fn select_of_session_aid_reopens_channel_locally() {
+    fn select_of_session_aid_uses_7fff_alias() {
         let mut f = Fake::default();
+        f.replies.push_back(Ok(vec![0x90, 0x00]));
         f.replies.push_back(Ok(vec![0x90, 0x00]));
         {
             let mut s = Session::new(&mut f, 1, vec![0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x02, 0xFF]);
-            s.transmit(&[0x00, 0xF2, 0x00, 0x00, 0x00]).unwrap();
+            // First SELECT AID opens the channel and is answered locally.
             let full = [0x00, 0xA4, 0x04, 0x0C, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x02, 0xFF];
             assert_eq!(s.transmit(&full).unwrap(), [0x90, 0x00]);
-            let partial_fcp = [0x00, 0xA4, 0x04, 0x04, 0x07, 0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x02];
-            assert_eq!(s.transmit(&partial_fcp).unwrap(), [0x62, 0x00, 0x90, 0x00]);
+            let fcp = [0x00, 0xA4, 0x04, 0x04, 0x07, 0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x02];
+            s.reset();
+            assert_eq!(s.transmit(&fcp).unwrap(), [0x62, 0x00, 0x90, 0x00]);
+            // On an open channel it becomes SELECT 7FFF, with the same P2.
+            s.transmit(&[0x00, 0xF2, 0x00, 0x00, 0x00]).unwrap();
+            assert_eq!(s.transmit(&full).unwrap(), [0x90, 0x00]);
         }
-        assert_eq!(f.sent.len(), 1, "SELECT AID never reaches the card");
-        assert_eq!(f.opens, 3);
-        assert_eq!(f.closed, vec![1, 2]);
+        assert_eq!(f.opens, 2);
+        assert_eq!(f.closed, vec![1]);
+        assert_eq!(f.sent[1], (2, vec![0x02, 0xA4, 0x00, 0x0C, 0x02, 0x7F, 0xFF]));
     }
 
     #[test]

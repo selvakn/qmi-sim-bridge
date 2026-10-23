@@ -6,7 +6,7 @@
 //! - `AT+QCFG="ims"` reports IMS disabled (`2`); setting it is acknowledged.
 //! - `AT+CGSN` is sent as `AT+GSN` (this firmware never terminates CGSN).
 //! - `AT+CFUN=<n>` is not forwarded (it would drop the radio and the data
-//!   link); it resets the SIM session instead and returns OK.
+//!   link); it returns OK.
 
 mod at;
 mod pty;
@@ -41,6 +41,7 @@ struct Args {
     aid: Option<Vec<u8>>,
     proxy: bool,
     proxy_wait: u64,
+    trace: bool,
 }
 
 const USAGE: &str = "\
@@ -54,6 +55,7 @@ Usage: at-qmi-bridge [options]
   --no-proxy       open the QMI device directly instead of via qmi-proxy
   --proxy-wait <s> how long to wait for qmi-proxy before opening the
                    device directly (default 120)
+  --trace          log every AT line received on the pty
   -h, --help       show this help
 ";
 
@@ -66,6 +68,7 @@ fn parse_args() -> Result<Args, String> {
         aid: None,
         proxy: true,
         proxy_wait: 120,
+        trace: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -77,6 +80,7 @@ fn parse_args() -> Result<Args, String> {
             "--slot" => a.slot = val()?.parse().map_err(|_| "bad --slot".to_string())?,
             "--aid" => a.aid = Some(at::hex_decode(&val()?).ok_or("bad --aid hex")?),
             "--no-proxy" => a.proxy = false,
+            "--trace" => a.trace = true,
             "--proxy-wait" => {
                 a.proxy_wait = val()?.parse().map_err(|_| "bad --proxy-wait".to_string())?
             }
@@ -240,7 +244,7 @@ fn run(a: Args) -> Result<(), String> {
                     if l.trim().is_empty() {
                         continue;
                     }
-                    handle_line(&l, &mut echo, &mut session, &mut modem, &out)?;
+                    handle_line(&l, &mut echo, &mut session, &mut modem, &out, a.trace)?;
                 }
                 b'\n' => {}
                 // Ctrl-Z / ESC end an SMS text/PDU prompt: forward as-is.
@@ -267,7 +271,11 @@ fn handle_line(
     session: &mut sim::Session<qmi::Uim>,
     modem: &mut File,
     out: &Mutex<File>,
+    trace: bool,
 ) -> Result<(), String> {
+    if trace {
+        eprintln!("> {l}");
+    }
     let cmd = at::classify(l);
     let shown = if *echo { Some(l) } else { None };
     let reply = match cmd {
@@ -296,8 +304,7 @@ fn handle_line(
             Some(at::reply(shown, &[], true))
         }
         Command::CfunSet(arg) => {
-            eprintln!("AT+CFUN={arg}: not forwarded; resetting SIM session");
-            session.reset();
+            eprintln!("AT+CFUN={arg}: not forwarded");
             Some(at::reply(shown, &[], true))
         }
     };
