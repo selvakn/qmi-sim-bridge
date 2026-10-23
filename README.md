@@ -99,7 +99,16 @@ and phones register as `1001` on port 5060. `.env` (holding
   This script turns it into a bind mount of `/tmp/shm` and creates
   `/dev/mqueue`.
 - `openwrt/podman-apps.init` (S99): runs `docker-compose up -d` for each
-  `/apps/*` at boot, through podman's Docker API socket.
+  `/apps/*` at boot, through podman's Docker API socket. It first runs the
+  app's executable `prestart`, if present. gsm-sip-bridge's `prestart` waits
+  until `/dev/ttyUSB3` answers `AT+CPIN?` with `READY`, because gsm-sip-bridge
+  probes its port only once at startup (5 s budget), and a miss disables
+  VoWiFi for the whole run.
+- Podman storage must live on the eMMC: OpenWrt's `/var` is tmpfs, so the
+  default `graphroot` loses every image at reboot and holds them in RAM. Set
+  `graphroot = "/overlay/containers/storage"` in
+  `/etc/containers/storage.conf`. Use the ext4 `/overlay` mount directly, not a
+  path under the overlayfs root.
 - Firewall: two additions to fw4, below. The WAN (LTE) still rejects everything.
 
 ### Firewall (fw4)

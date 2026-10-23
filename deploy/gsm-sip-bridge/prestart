@@ -1,0 +1,26 @@
+#!/bin/sh
+# Run by /etc/init.d/podman-apps before `docker-compose up -d`.
+#
+# gsm-sip-bridge probes its modem port once at startup (5 s budget) and
+# disables VoWiFi for the whole run if the SIM is not ready by then. At boot
+# at-qmi-bridge and the modem come up later than podman, so wait until the
+# pty answers AT+CPIN? with READY (or give up after ~3 minutes and start
+# anyway; the container can be restarted later).
+
+PORT=/dev/ttyUSB3
+OUT=/tmp/gsm-sip-bridge-prestart.out
+
+i=0
+while [ $i -lt 36 ]; do
+	if [ -e "$PORT" ]; then
+		(timeout 4 cat "$PORT" > "$OUT" &)
+		sleep 1
+		printf 'AT+CPIN?\r' > "$PORT"
+		sleep 3
+		grep -q 'READY' "$OUT" && { echo "SIM ready on $PORT"; exit 0; }
+	fi
+	sleep 2
+	i=$((i + 1))
+done
+echo "SIM not ready on $PORT after waiting; starting anyway"
+exit 0

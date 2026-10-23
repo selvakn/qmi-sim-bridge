@@ -40,6 +40,7 @@ struct Args {
     slot: u8,
     aid: Option<Vec<u8>>,
     proxy: bool,
+    proxy_wait: u64,
 }
 
 const USAGE: &str = "\
@@ -51,6 +52,8 @@ Usage: at-qmi-bridge [options]
   --slot <n>       SIM slot                   (default 1)
   --aid <hex>      USIM AID (default: discovered with AT+CUAD)
   --no-proxy       open the QMI device directly instead of via qmi-proxy
+  --proxy-wait <s> how long to wait for qmi-proxy before opening the
+                   device directly (default 120)
   -h, --help       show this help
 ";
 
@@ -62,6 +65,7 @@ fn parse_args() -> Result<Args, String> {
         slot: 1,
         aid: None,
         proxy: true,
+        proxy_wait: 120,
     };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -73,6 +77,9 @@ fn parse_args() -> Result<Args, String> {
             "--slot" => a.slot = val()?.parse().map_err(|_| "bad --slot".to_string())?,
             "--aid" => a.aid = Some(at::hex_decode(&val()?).ok_or("bad --aid hex")?),
             "--no-proxy" => a.proxy = false,
+            "--proxy-wait" => {
+                a.proxy_wait = val()?.parse().map_err(|_| "bad --proxy-wait".to_string())?
+            }
             "-h" | "--help" => {
                 print!("{USAGE}");
                 std::process::exit(0);
@@ -130,9 +137,21 @@ fn usim_aid_from_cuad(lines: &[String]) -> Option<Vec<u8>> {
 
 fn connect_qmi(a: &Args) -> Result<qmi::Uim, qmi::QmiError> {
     if a.proxy {
-        match qmi::Uim::connect_proxy(&a.qmi_device, Duration::from_secs(15)) {
-            Ok(q) => return Ok(q),
-            Err(e) => eprintln!("qmi-proxy unavailable ({e}); opening {} directly", a.qmi_device),
+        // At boot ModemManager starts qmi-proxy some time after us; wait for
+        // it rather than racing it for the device.
+        let deadline = Instant::now() + Duration::from_secs(a.proxy_wait);
+        loop {
+            match qmi::Uim::connect_proxy(&a.qmi_device, Duration::from_secs(15)) {
+                Ok(q) => return Ok(q),
+                Err(e) if Instant::now() < deadline && !STOP.load(Ordering::SeqCst) => {
+                    eprintln!("qmi-proxy not ready ({e}); retrying");
+                    std::thread::sleep(Duration::from_secs(5));
+                }
+                Err(e) => {
+                    eprintln!("qmi-proxy unavailable ({e}); opening {} directly", a.qmi_device);
+                    break;
+                }
+            }
         }
     }
     qmi::Uim::connect_device(&a.qmi_device)
@@ -183,7 +202,13 @@ fn run(a: Args) -> Result<(), String> {
             let mut buf = [0u8; 1024];
             loop {
                 match rx.read(&mut buf) {
-                    Ok(0) => std::thread::sleep(Duration::from_millis(50)),
+                    // EOF: the port went away (modem restart). Exit and let
+                    // procd respawn us against the new port.
+                    Ok(0) => {
+                        eprintln!("AT port closed");
+                        STOP.store(true, Ordering::SeqCst);
+                        return;
+                    }
                     Ok(n) => {
                         let _ = out.lock().unwrap().write_all(&buf[..n]);
                     }

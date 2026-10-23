@@ -1,6 +1,7 @@
 #!/bin/sh /etc/rc.common
 # Bring up every compose app under /apps at boot (podman has no
 # restart-policy daemon here). Runs after podman's API service (S99podman).
+# An executable /apps/<app>/prestart runs first (e.g. to wait for a device).
 
 START=99
 STOP=05
@@ -18,7 +19,7 @@ start() {
 	wait_socket
 	for f in /apps/*/docker-compose.yml; do
 		[ -f "$f" ] || continue
-		( cd "${f%/*}" && DOCKER_HOST=$COMPOSE_HOST docker-compose up -d ) 2>&1 \
+		( cd "${f%/*}" && { [ -x ./prestart ] && ./prestart; DOCKER_HOST=$COMPOSE_HOST docker-compose up -d; } ) 2>&1 \
 			| logger -t podman-apps
 	done
 }
