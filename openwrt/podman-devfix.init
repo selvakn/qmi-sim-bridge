@@ -1,0 +1,21 @@
+#!/bin/sh /etc/rc.common
+# Containers that bind-mount the host /dev (gsm-sip-bridge) make crun create
+# /dev/shm and /dev/mqueue inside it. OpenWrt's /dev/shm is a symlink to
+# /tmp/shm, which crun refuses to follow, so turn it into a directory backed
+# by the same /tmp/shm. Runs before podman (START=99).
+
+START=97
+
+boot() {
+	start
+}
+
+start() {
+	mkdir -p /tmp/shm /dev/mqueue
+	if [ -L /dev/shm ]; then
+		rm /dev/shm
+		mkdir /dev/shm
+	fi
+	grep -q " /dev/shm " /proc/mounts || mount --bind /tmp/shm /dev/shm
+	chmod 1777 /tmp/shm
+}

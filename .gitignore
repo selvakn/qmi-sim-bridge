@@ -1,2 +1,4 @@
 /target
 /dist
+deploy/*/.env
+deploy/*/data/

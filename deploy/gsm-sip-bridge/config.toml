@@ -1,0 +1,29 @@
+# gsm-sip-bridge: VoWiFi line on the stick's own SIM, SIP server mode.
+# Secrets come from .env (env:VAR).
+
+[sip]
+# 5060 is left for the phones (sip_server.listen_port).
+local_port = 5062
+
+[sip_server]
+enabled = true
+ring_aor = "1001"
+
+[[sip_server.account]]
+username = "1001"
+password = "env:PHONE_1001_PASSWORD"
+
+[cs]
+# No Quectel audio path here; every call is VoWiFi.
+enabled = false
+
+[vowifi]
+enabled = true
+
+[[vowifi.line]]
+# at-qmi-bridge's pty (see fake-usb/ in docker-compose.yml).
+modem_port = "/dev/ttyUSB3"
+
+[sms]
+enabled = true
+db_path = "/data/store.db"

@@ -16,6 +16,8 @@ pub enum Command {
     /// `AT+CFUN=<fun>[,<rst>]`: would take the radio (and the LTE data link)
     /// down on this modem, so it is answered locally.
     CfunSet(String),
+    /// Forwarded as a different command (modem firmware quirk workaround).
+    Rewrite(&'static str),
     /// `ATE0` / `ATE1`: forwarded, but tracked to echo locally-answered lines.
     Echo(bool),
     /// Anything else goes to the modem unchanged.
@@ -29,6 +31,9 @@ pub fn classify(line: &str) -> Command {
         "ATE0" => return Command::Echo(false),
         "ATE1" | "ATE" => return Command::Echo(true),
         "AT+CSIM=?" => return Command::CsimTest,
+        // HIMI_U01 firmware answers AT+CGSN with the IMEI but never sends the
+        // final OK; AT+GSN returns the same IMEI and terminates properly.
+        "AT+CGSN" => return Command::Rewrite("AT+GSN"),
         _ => {}
     }
     if let Some(args) = u.strip_prefix("AT+CSIM=") {
@@ -130,8 +135,15 @@ mod tests {
     }
 
     #[test]
+    fn rewrites_cgsn() {
+        assert_eq!(classify("AT+CGSN"), Command::Rewrite("AT+GSN"));
+        assert_eq!(classify("at+cgsn"), Command::Rewrite("AT+GSN"));
+        assert_eq!(classify("AT+CGSN=1"), Command::Passthrough);
+    }
+
+    #[test]
     fn passes_through_the_rest() {
-        for c in ["AT", "ATI", "AT+CIMI", "AT+CGSN", "AT+COPS=3,2;+COPS?", "AT+CRSM=176,28589,0,0,4"] {
+        for c in ["AT", "ATI", "AT+CIMI", "AT+COPS=3,2;+COPS?", "AT+CRSM=176,28589,0,0,4"] {
             assert_eq!(classify(c), Command::Passthrough, "{c}");
         }
     }

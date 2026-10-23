@@ -22,6 +22,7 @@ Commands from the pty are forwarded to the real AT port (default
 | SELECT by AID of the USIM (`00A404..`) | The modem refuses application selection through raw APDUs (QMI error 82). The bridge reopens the logical channel, which selects the USIM, and answers `9000` (or FCP + `9000`). |
 | `AT+QCFG="ims"` | Answers `+QCFG: "ims",2,0`: the modem has no IMS stack, so "disabled" is the truth. A set is acknowledged and ignored. |
 | `AT+CFUN=<n>` | Not forwarded, because it would drop the radio and the LTE data link. The bridge resets the SIM session (closes and reopens the channel) and returns `OK`. |
+| `AT+CGSN` | Sent as `AT+GSN`. The HIMI_U01 firmware answers `AT+CGSN` with the IMEI but never sends the final `OK`, so callers time out. |
 | `ATE0` / `ATE1` | Forwarded, and tracked so that locally answered commands are echoed consistently. |
 
 Modem responses and unsolicited result codes are copied back to the pty as-is.
@@ -82,3 +83,28 @@ USIM AID), then SELECT USIM by AID, then AUTHENTICATE (3G context). With dummy
 RAND/AUTN, AUTHENTICATE returns `9862` (MAC failure), which is the card doing a
 real AKA check. Also verified: EF_IMSI read, STATUS, `AT+QCFG="ims"`,
 `AT+CFUN=0` interception, and passthrough of `AT+CIMI` and `AT+CSQ`.
+
+## Deploying gsm-sip-bridge on the stick
+
+`deploy/gsm-sip-bridge/` holds the compose app that lives in
+`/apps/gsm-sip-bridge` on the stick. It runs VoWiFi only, in SIP server mode,
+and phones register as `1001` on port 5060. `.env` (holding
+`PHONE_1001_PASSWORD`) is not committed.
+
+- gsm-sip-bridge discovers modems only by walking `/sys/bus/usb/devices` for
+  Quectel IDs. `fake-usb/` is mounted over that path inside the container and
+  describes one EC200 (AT-only, VoWiFi-only) whose AT port is `ttyUSB3`.
+- `openwrt/podman-devfix.init` (S97): crun cannot create `/dev/shm` inside the
+  bind-mounted host `/dev`, because OpenWrt makes it a symlink to `/tmp/shm`.
+  This script turns it into a bind mount of `/tmp/shm` and creates
+  `/dev/mqueue`.
+- `openwrt/podman-apps.init` (S99): runs `docker-compose up -d` for each
+  `/apps/*` at boot, through podman's Docker API socket.
+- Firewall: rule `devices_voip` accepts UDP from the Wi-Fi LAN zone only. The
+  WAN (LTE) still rejects everything.
+
+```
+cd /apps/gsm-sip-bridge
+DOCKER_HOST=unix:///run/podman/podman.sock docker-compose up -d
+podman exec gsm-sip-bridge gsm-sip-bridge --config /etc/gsm-sip-bridge/config.toml vowifi-status
+```

@@ -1,0 +1,35 @@
+# gsm-sip-bridge on the HMUF02-V5 OpenWrt stick (podman + docker-compose).
+#
+# VoWiFi-only, SIP server mode: phones on the Wi-Fi LAN register to the
+# bridge, inbound mobile calls ring account 1001.
+#
+# The SIM is reached through at-qmi-bridge (/dev/ttyUSB3, a pty serving
+# AT+CSIM over QMI). gsm-sip-bridge only discovers modems by walking
+# /sys/bus/usb/devices for Quectel IDs, so ./fake-usb describes one
+# "EC200" (AT-only, VoWiFi-only) whose AT port is ttyUSB3.
+services:
+  gsm-sip-bridge:
+    image: ghcr.io/selvakn/gsm-sip-bridge:8.22.0
+    container_name: gsm-sip-bridge
+    network_mode: host
+    restart: always
+    privileged: true
+    init: true
+    stop_grace_period: 90s
+    volumes:
+      - ./data:/data
+      - ./config.toml:/etc/gsm-sip-bridge/config.toml:ro
+      - /dev:/dev
+      - /sys:/sys:ro
+      - ./fake-usb:/sys/bus/usb/devices:ro
+    env_file:
+      - .env
+    group_add:
+      - audio
+      - dialout
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/gsm-sip-bridge", "--config", "/etc/gsm-sip-bridge/config.toml", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 180s
+      retries: 3

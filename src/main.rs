@@ -4,6 +4,7 @@
 //!
 //! Everything else is forwarded to the real AT port unchanged, except:
 //! - `AT+QCFG="ims"` reports IMS disabled (`2`); setting it is acknowledged.
+//! - `AT+CGSN` is sent as `AT+GSN` (this firmware never terminates CGSN).
 //! - `AT+CFUN=<n>` is not forwarded (it would drop the radio and the data
 //!   link); it resets the SIM session instead and returns OK.
 
@@ -246,6 +247,11 @@ fn handle_line(
     let shown = if *echo { Some(l) } else { None };
     let reply = match cmd {
         Command::Passthrough => None,
+        Command::Rewrite(to) => {
+            return modem
+                .write_all(format!("{to}\r").as_bytes())
+                .map_err(|e| format!("AT port write: {e}"));
+        }
         Command::Echo(on) => {
             *echo = on;
             None
