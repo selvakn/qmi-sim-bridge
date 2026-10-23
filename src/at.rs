@@ -113,7 +113,10 @@ mod tests {
             classify(r#"AT+CSIM=14,"00A4000C023F00""#),
             Command::Csim(vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0x3F, 0x00])
         );
-        assert_eq!(classify(r#"at+csim=10,"80f2000000""#), Command::Csim(vec![0x80, 0xF2, 0, 0, 0]));
+        assert_eq!(
+            classify(r#"at+csim=10,"80f2000000""#),
+            Command::Csim(vec![0x80, 0xF2, 0, 0, 0])
+        );
         assert_eq!(classify(r#"AT+CSIM=12,"80F2000000""#), Command::CsimInvalid);
         assert_eq!(classify(r#"AT+CSIM=3,"80F""#), Command::CsimInvalid);
         assert_eq!(classify("AT+CSIM=?"), Command::CsimTest);
@@ -143,7 +146,13 @@ mod tests {
 
     #[test]
     fn passes_through_the_rest() {
-        for c in ["AT", "ATI", "AT+CIMI", "AT+COPS=3,2;+COPS?", "AT+CRSM=176,28589,0,0,4"] {
+        for c in [
+            "AT",
+            "ATI",
+            "AT+CIMI",
+            "AT+COPS=3,2;+COPS?",
+            "AT+CRSM=176,28589,0,0,4",
+        ] {
             assert_eq!(classify(c), Command::Passthrough, "{c}");
         }
     }

@@ -256,7 +256,14 @@ impl Uim {
 
     /// Send a request and wait for its response, skipping indications and
     /// traffic for other clients.
-    fn transact(&mut self, service: u8, client: u8, txn: u16, msg_id: u16, tlvs: &[Tlv]) -> Result<Message> {
+    fn transact(
+        &mut self,
+        service: u8,
+        client: u8,
+        txn: u16,
+        msg_id: u16,
+        tlvs: &[Tlv],
+    ) -> Result<Message> {
         self.io
             .write_all(&encode_frame(service, client, txn, msg_id, tlvs))?;
         loop {
@@ -337,7 +344,11 @@ fn open_channel_tlvs(slot: u8, aid: &[u8]) -> Vec<Tlv> {
 fn send_apdu_tlvs(slot: u8, channel: u8, apdu: &[u8]) -> Vec<Tlv> {
     let mut a = (apdu.len() as u16).to_le_bytes().to_vec();
     a.extend_from_slice(apdu);
-    vec![Tlv(0x10, vec![channel]), Tlv(0x02, a), Tlv(0x01, vec![slot])]
+    vec![
+        Tlv(0x10, vec![channel]),
+        Tlv(0x02, a),
+        Tlv(0x01, vec![slot]),
+    ]
 }
 
 fn close_channel_tlvs(slot: u8, channel: u8) -> Vec<Tlv> {
@@ -351,7 +362,9 @@ mod tests {
     // Frames captured from `qmicli --verbose-full` against the HMUF02-V5 modem.
 
     fn hex(s: &str) -> Vec<u8> {
-        s.split(':').map(|b| u8::from_str_radix(b, 16).unwrap()).collect()
+        s.split(':')
+            .map(|b| u8::from_str_radix(b, 16).unwrap())
+            .collect()
     }
 
     #[test]
@@ -384,7 +397,13 @@ mod tests {
     #[test]
     fn encodes_open_logical_channel() {
         let aid = hex("A0:00:00:00:87:10:02:FF:F6:05:FF:89:00:00:01:FF");
-        let f = encode_frame(SVC_UIM, 2, 1, UIM_OPEN_LOGICAL_CHANNEL, &open_channel_tlvs(1, &aid));
+        let f = encode_frame(
+            SVC_UIM,
+            2,
+            1,
+            UIM_OPEN_LOGICAL_CHANNEL,
+            &open_channel_tlvs(1, &aid),
+        );
         assert_eq!(f, hex("01:24:00:00:0B:02:00:01:00:42:00:18:00:10:11:00:10:A0:00:00:00:87:10:02:FF:F6:05:FF:89:00:00:01:FF:01:01:00:01"));
     }
 
@@ -400,13 +419,20 @@ mod tests {
 
     #[test]
     fn encodes_send_apdu() {
-        let f = encode_frame(SVC_UIM, 2, 1, UIM_SEND_APDU, &send_apdu_tlvs(1, 1, &hex("01:F2:00:00:00")));
+        let f = encode_frame(
+            SVC_UIM,
+            2,
+            1,
+            UIM_SEND_APDU,
+            &send_apdu_tlvs(1, 1, &hex("01:F2:00:00:00")),
+        );
         assert_eq!(f, hex("01:1E:00:00:0B:02:00:01:00:3B:00:12:00:10:01:00:01:02:07:00:05:00:01:F2:00:00:00:01:01:00:01"));
     }
 
     #[test]
     fn decodes_send_apdu_response() {
-        let f = hex("01:1A:00:80:0B:02:02:01:00:3B:00:0E:00:02:04:00:00:00:00:00:10:04:00:02:00:6D:00");
+        let f =
+            hex("01:1A:00:80:0B:02:02:01:00:3B:00:0E:00:02:04:00:00:00:00:00:10:04:00:02:00:6D:00");
         let m = decode_frame(&f[1..]).unwrap();
         m.check().unwrap();
         assert_eq!(m.tlv(0x10), Some(&[0x02, 0x00, 0x6D, 0x00][..]));
@@ -414,13 +440,24 @@ mod tests {
 
     #[test]
     fn encodes_close_channel() {
-        let f = encode_frame(SVC_UIM, 2, 1, UIM_LOGICAL_CHANNEL, &close_channel_tlvs(1, 1));
-        assert_eq!(f, hex("01:14:00:00:0B:02:00:01:00:3F:00:08:00:11:01:00:01:01:01:00:01"));
+        let f = encode_frame(
+            SVC_UIM,
+            2,
+            1,
+            UIM_LOGICAL_CHANNEL,
+            &close_channel_tlvs(1, 1),
+        );
+        assert_eq!(
+            f,
+            hex("01:14:00:00:0B:02:00:01:00:3F:00:08:00:11:01:00:01:01:01:00:01")
+        );
     }
 
     #[test]
     fn decodes_indication_flags() {
-        let f = hex("01:1B:00:80:0B:02:04:01:00:43:00:0F:00:13:04:00:01:00:00:00:01:01:00:01:11:01:00:01");
+        let f = hex(
+            "01:1B:00:80:0B:02:04:01:00:43:00:0F:00:13:04:00:01:00:00:00:01:01:00:01:11:01:00:01",
+        );
         let m = decode_frame(&f[1..]).unwrap();
         assert_eq!(m.sdu_flags & SDU_FLAG_INDICATION, SDU_FLAG_INDICATION);
         assert_eq!(m.msg_id, 0x43);
@@ -462,8 +499,12 @@ mod tests {
 
     #[test]
     fn transact_skips_indications() {
-        let mut replies = hex("01:1B:00:80:0B:02:04:01:00:43:00:0F:00:13:04:00:01:00:00:00:01:01:00:01:11:01:00:01");
-        replies.extend(hex("01:13:00:80:0B:02:02:01:00:3F:00:07:00:02:04:00:00:00:00:00"));
+        let mut replies = hex(
+            "01:1B:00:80:0B:02:04:01:00:43:00:0F:00:13:04:00:01:00:00:00:01:01:00:01:11:01:00:01",
+        );
+        replies.extend(hex(
+            "01:13:00:80:0B:02:02:01:00:3F:00:07:00:02:04:00:00:00:00:00",
+        ));
         let mut q = Uim::new(Box::new(Script {
             replies: io::Cursor::new(replies),
             written: vec![],

@@ -14,7 +14,56 @@ Under Podman, every stop or recreate of the gsm-sip-bridge container with a live
 That is a kernel memory-corruption bug (a 2-byte `86 dd` write into freed memory), not a Podman or gsm-sip-bridge bug.
 Container teardown just reliably exposed it. Run natively, the same workload has stopped and started cleanly.
 
-## Architecture
+## Two ways to give gsm-sip-bridge the SIM
+
+| | **PC/SC mode (recommended)** | AT mode (original) |
+|---|---|---|
+| at-qmi-bridge | `--vpcd 127.0.0.1:15963`: the virtual card behind pcscd's vpcd reader, renamed `QMI SIM` | pty at `/dev/ttyUSB3` pretending to be a Quectel AT port |
+| gsm-sip-bridge line | `pcsc_reader = true` + `imsi_override` (+ `mcc`/`mnc`, `imei_override`) | `modem_port = "/dev/ttyUSB3"` |
+| AT port use | none (QMI only) | `wwan0at1`, shared with ModemManager |
+| Workarounds needed | reader rename | fake-usb sysfs, `AT+CGSN`/`QCFG`/`CFUN` emulation, `prestart` SIM wait, ModemManager port-ignore rule |
+| Modem SMS sweep | not run (reader lines have no modem) | runs; times out now and then |
+
+PC/SC mode removes every AT-related failure seen during bring-up. Both modes share the QMI SIM session
+code: a persistent logical channel, `SELECT 7FFF` for re-selecting the USIM, and reconnecting after a qmi-proxy
+restart. AT mode is still documented below.
+
+### PC/SC mode setup
+
+1. at-qmi-bridge in PC/SC mode:
+   `uci set at-qmi-bridge.main.vpcd=127.0.0.1:15963; uci commit at-qmi-bridge; /etc/init.d/at-qmi-bridge restart`.
+   It retries the connection every 300 ms until pcscd (started by supervise) listens.
+2. `config.toml` from `deploy/native/config.pcsc.toml`, with the real IMSI (`mmcli -i any`) and IMEI
+   (`qmicli -p -d /dev/wwan0qmi0 --dms-get-ids`) filled in on the stick only:
+   ```toml
+   [[vowifi.line]]
+   pcsc_reader = true
+   mcc = "404"
+   mnc = "043"                   # zero-padded: "43" builds epdg.epc.mnc43…, which does not resolve
+   imsi_override = "<IMSI>"
+   imei_override = "<IMEI>"
+   ```
+   Pinning `mcc`/`mnc` avoids supervise reading them from the card the instant it starts pcscd, before
+   at-qmi-bridge has connected ("FATAL: could not derive MCC/MNC; skipping this line").
+3. The init script's `setup_pcsc_reader` runs when the config has `pcsc_reader = true`:
+   - points `$ROOT/etc/reader.conf.d/vpcd` (rewritten by supervise at every start as "Virtual PCD") at `/dev/null`;
+   - writes `$ROOT/etc/reader.conf.d/qmisim`: one vpcd reader named `QMI SIM` on port 15963 (`0x3E5B`).
+
+   gsm-sip-bridge's PC/SC transport skips readers named `Virtual PCD`, hence the rename. A *second* vpcd reader
+   entry next to supervise's doesn't work: pcscd shows its slots, but never polls the card ("no card"). Keep no other
+   files in `reader.conf.d` that define a reader on 15963, because pcscd reads every file there.
+
+Verify:
+
+```sh
+LD_LIBRARY_PATH=$ROOT/usr/lib:$ROOT/lib $ROOT/usr/local/bin/gsm-sip-bridge --config $APP/config.toml pcsc-list
+#   QMI SIM 00 00   ok   <imsi>   404   043   <carrier>
+logread -e at-qmi-bridge     # vpcd: connected to 127.0.0.1:15963
+```
+
+On Vi India the tunnel comes up and REGISTER returns `200 OK` within about 10 s of the service starting.
+
+## Architecture (AT mode)
 
 ```
 phones (Wi-Fi LAN / VPN) --SIP 5060/udp--> gsm-sip-bridge supervise   (host netns)
@@ -42,7 +91,8 @@ channels. See the [README](../README.md) for what it answers itself.
 | `/overlay/gsm-sip-bridge-root/` | the gsm-sip-bridge image's root filesystem, unpacked (~40 MB) | from `ghcr.io/selvakn/gsm-sip-bridge:<tag>` |
 | `/etc/init.d/gsm-sip-bridge` | native procd service (S99) | `deploy/native/gsm-sip-bridge.init` |
 | `/apps/gsm-sip-bridge/run-native` | launcher | `deploy/native/run-native` |
-| `/apps/gsm-sip-bridge/config.toml` | config (`db_path` under `/apps`) | `deploy/native/config.toml` |
+| `/apps/gsm-sip-bridge/config.toml` | config (`db_path` under `/apps`) | `deploy/native/config.pcsc.toml` (PC/SC) or `deploy/native/config.toml` (AT) |
+| `$ROOT/etc/reader.conf.d/qmisim` | PC/SC mode: the `QMI SIM` vpcd reader (written by the init script) | `openwrt/qmisim.reader.conf` |
 | `/apps/gsm-sip-bridge/.env` | `PHONE_1001_PASSWORD=…` (mode 600, never committed) | — |
 | `/apps/gsm-sip-bridge/prestart` | waits for SIM READY + IMSI on `/dev/ttyUSB3` | `deploy/gsm-sip-bridge/prestart` |
 | `/apps/gsm-sip-bridge/fake-usb/` | fake USB sysfs entry (EC200 whose AT port is `ttyUSB3`) | `deploy/gsm-sip-bridge/fake-usb/` |

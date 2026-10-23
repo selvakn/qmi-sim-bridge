@@ -44,10 +44,29 @@ patch_updown() {
 	sed -i 's| 2>/dev/null \|\| true| 2>\&1 \| logger -t ims.updown \|\| true|' "$u"
 }
 
+# PC/SC mode (config has `pcsc_reader = true`): pcscd must expose exactly one
+# vpcd reader, named so gsm-sip-bridge's PC/SC transport doesn't skip it
+# (it ignores "Virtual PCD" readers), on the port supervise gates on (15963).
+# supervise rewrites reader.conf.d/vpcd ("Virtual PCD") at every start, so
+# that path is pointed at /dev/null and our own "QMI SIM" entry replaces it.
+# A second vpcd reader entry alongside it does not work.
+setup_pcsc_reader() {
+	local d="$ROOT/etc/reader.conf.d"
+	grep -q '^pcsc_reader = true' "$APP/config.toml" || return 0
+	[ -L "$d/vpcd" ] || { mv "$d/vpcd" "$ROOT/etc/vpcd.reader.supervise-orig" 2>/dev/null; ln -sfn /dev/null "$d/vpcd"; }
+	cat > "$d/qmisim" <<-'CONF'
+	FRIENDLYNAME "QMI SIM"
+	DEVICENAME   /dev/null:0x3E5B
+	LIBPATH      /usr/lib/pcsc/drivers/serial/libifdvpcd.so
+	CHANNELID    0x3E5B
+	CONF
+}
+
 prepare() {
 	local p
 	[ -f "$ROOT/.relinked" ] || { relink_root && touch "$ROOT/.relinked"; }
 	patch_updown
+	setup_pcsc_reader
 	for p in $LINKS; do
 		[ -e "$p" ] || [ -L "$p" ] || { mkdir -p "${p%/*}"; ln -s "$ROOT$p" "$p"; }
 	done

@@ -12,6 +12,7 @@ mod at;
 mod pty;
 mod qmi;
 mod sim;
+mod vpcd;
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -42,6 +43,7 @@ struct Args {
     proxy: bool,
     proxy_wait: u64,
     trace: bool,
+    vpcd: Option<String>,
 }
 
 const USAGE: &str = "\
@@ -55,7 +57,10 @@ Usage: at-qmi-bridge [options]
   --no-proxy       open the QMI device directly instead of via qmi-proxy
   --proxy-wait <s> how long to wait for qmi-proxy before opening the
                    device directly (default 120)
-  --trace          log every AT line received on the pty
+  --trace          log every AT line (pty mode) / vpcd message (PC/SC mode)
+  --vpcd <h:p>     PC/SC mode: act as the card for pcscd's vpcd reader at
+                   host:port (no pty, no AT port); give that reader a
+                   FRIENDLYNAME other than 'Virtual PCD'
   -h, --help       show this help
 ";
 
@@ -69,6 +74,7 @@ fn parse_args() -> Result<Args, String> {
         proxy: true,
         proxy_wait: 120,
         trace: false,
+        vpcd: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -81,6 +87,7 @@ fn parse_args() -> Result<Args, String> {
             "--aid" => a.aid = Some(at::hex_decode(&val()?).ok_or("bad --aid hex")?),
             "--no-proxy" => a.proxy = false,
             "--trace" => a.trace = true,
+            "--vpcd" => a.vpcd = Some(val()?),
             "--proxy-wait" => {
                 a.proxy_wait = val()?.parse().map_err(|_| "bad --proxy-wait".to_string())?
             }
@@ -113,11 +120,17 @@ fn at_query(port: &mut File, cmd: &str, timeout: Duration) -> std::io::Result<Ve
             .filter(|l| !l.is_empty())
             .map(String::from)
             .collect();
-        if lines.iter().any(|l| l == "OK" || l == "ERROR" || l.starts_with("+CME ERROR")) {
+        if lines
+            .iter()
+            .any(|l| l == "OK" || l == "ERROR" || l.starts_with("+CME ERROR"))
+        {
             return Ok(lines);
         }
     }
-    Err(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("{cmd}: no final result")))
+    Err(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        format!("{cmd}: no final result"),
+    ))
 }
 
 /// Find the USIM AID in an `AT+CUAD` reply (EF_DIR records, tag 61 / 4F).
@@ -152,7 +165,10 @@ fn connect_qmi(a: &Args) -> Result<qmi::Uim, qmi::QmiError> {
                     std::thread::sleep(Duration::from_secs(5));
                 }
                 Err(e) => {
-                    eprintln!("qmi-proxy unavailable ({e}); opening {} directly", a.qmi_device);
+                    eprintln!(
+                        "qmi-proxy unavailable ({e}); opening {} directly",
+                        a.qmi_device
+                    );
                     break;
                 }
             }
@@ -180,7 +196,11 @@ impl QmiLink {
             } else {
                 qmi::Uim::connect_device(&self.device)?
             };
-            eprintln!("QMI UIM client {} on {} (reconnected)", u.cid(), self.device);
+            eprintln!(
+                "QMI UIM client {} on {} (reconnected)",
+                u.cid(),
+                self.device
+            );
             self.uim = Some(u);
         }
         let r = f(self.uim.as_mut().expect("connected above"));
@@ -203,7 +223,51 @@ impl sim::Transport for QmiLink {
     }
 }
 
+/// PC/SC mode: be the virtual card behind a pcscd vpcd reader. No AT port is
+/// touched; the USIM channel is opened by AID (the 7-byte USIM prefix unless
+/// --aid is given).
+fn run_vpcd(a: &Args, addr: &str) -> Result<(), String> {
+    let aid = a.aid.clone().unwrap_or_else(|| USIM_AID_PREFIX.to_vec());
+    let uim = connect_qmi(a).map_err(|e| format!("QMI: {e}"))?;
+    eprintln!("QMI UIM client {} on {}", uim.cid(), a.qmi_device);
+    let link = QmiLink {
+        uim: Some(uim),
+        device: a.qmi_device.clone(),
+        proxy: a.proxy,
+    };
+    let mut session = sim::Session::new(link, a.slot, aid);
+    let mut transmit = |apdu: &[u8]| session.transmit(apdu).map_err(|e| e.to_string());
+
+    // pcscd (and its vpcd listener) is started and restarted by
+    // gsm-sip-bridge's supervise; keep reconnecting.
+    let mut waiting = false;
+    loop {
+        match std::net::TcpStream::connect(addr) {
+            Ok(mut s) => {
+                waiting = false;
+                eprintln!("vpcd: connected to {addr}");
+                match vpcd::serve(&mut s, &mut transmit, a.trace) {
+                    Ok(()) => eprintln!("vpcd: {addr} closed the connection"),
+                    Err(e) => eprintln!("vpcd: connection to {addr} failed: {e}"),
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+            Err(e) => {
+                if !waiting {
+                    eprintln!("vpcd: {addr} not available ({e}); retrying");
+                    waiting = true;
+                }
+                // Short: supervise reads the card right after starting pcscd.
+                std::thread::sleep(Duration::from_millis(300));
+            }
+        }
+    }
+}
+
 fn run(a: Args) -> Result<(), String> {
+    if let Some(addr) = a.vpcd.clone() {
+        return run_vpcd(&a, &addr);
+    }
     let mut modem = OpenOptions::new()
         .read(true)
         .write(true)
@@ -234,8 +298,7 @@ fn run(a: Args) -> Result<(), String> {
     let mut session = sim::Session::new(link, a.slot, aid);
 
     let pty = pty::open().map_err(|e| format!("openpty: {e}"))?;
-    pty::link(&pty.slave_path, &a.link)
-        .map_err(|e| format!("link {}: {e}", a.link.display()))?;
+    pty::link(&pty.slave_path, &a.link).map_err(|e| format!("link {}: {e}", a.link.display()))?;
     eprintln!(
         "serving {} -> {} (AT port {})",
         a.link.display(),
@@ -243,7 +306,9 @@ fn run(a: Args) -> Result<(), String> {
         a.at_port.display()
     );
 
-    let out = Arc::new(Mutex::new(pty.master.try_clone().map_err(|e| e.to_string())?));
+    let out = Arc::new(Mutex::new(
+        pty.master.try_clone().map_err(|e| e.to_string())?,
+    ));
 
     // Modem -> pty: responses and unsolicited result codes, verbatim.
     {
@@ -282,7 +347,9 @@ fn run(a: Args) -> Result<(), String> {
         if !pty::readable(master.as_raw_fd(), 1000).map_err(|e| e.to_string())? {
             continue;
         }
-        let n = master.read(&mut buf).map_err(|e| format!("pty read: {e}"))?;
+        let n = master
+            .read(&mut buf)
+            .map_err(|e| format!("pty read: {e}"))?;
         for &b in &buf[..n] {
             match b {
                 b'\r' => {
@@ -373,10 +440,13 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    // SAFETY: the handler only stores to an atomic.
-    unsafe {
-        libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
-        libc::signal(libc::SIGINT, on_signal as *const () as libc::sighandler_t);
+    // SAFETY: the handler only stores to an atomic. PC/SC mode blocks in
+    // socket reads and keeps the default handlers (exit on SIGTERM).
+    if args.vpcd.is_none() {
+        unsafe {
+            libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
+            libc::signal(libc::SIGINT, on_signal as *const () as libc::sighandler_t);
+        }
     }
     match run(args) {
         Ok(()) => ExitCode::SUCCESS,

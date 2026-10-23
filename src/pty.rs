@@ -17,7 +17,13 @@ pub fn open() -> io::Result<Pty> {
     let (mut m, mut s) = (0, 0);
     // SAFETY: openpty writes two fds; name/termios/winsize may be null.
     let rc = unsafe {
-        libc::openpty(&mut m, &mut s, std::ptr::null_mut(), std::ptr::null(), std::ptr::null())
+        libc::openpty(
+            &mut m,
+            &mut s,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            std::ptr::null(),
+        )
     };
     if rc != 0 {
         return Err(io::Error::last_os_error());
@@ -31,7 +37,11 @@ pub fn open() -> io::Result<Pty> {
         return Err(io::Error::last_os_error());
     }
     // SAFETY: ttyname_r NUL-terminated buf on success.
-    let slave_path = PathBuf::from(unsafe { CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().into_owned());
+    let slave_path = PathBuf::from(
+        unsafe { CStr::from_ptr(buf.as_ptr()) }
+            .to_string_lossy()
+            .into_owned(),
+    );
 
     // SAFETY: termios is plain data; tcgetattr fills it before use.
     unsafe {

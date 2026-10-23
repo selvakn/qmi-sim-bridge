@@ -8,6 +8,10 @@
 # boot the modem reports READY a little before CIMI works, and discovery
 # needs both. Gives up after ~3 minutes and starts anyway.
 
+# PC/SC mode (pcsc_reader line): no AT port to wait for; at-qmi-bridge
+# reconnects to the vpcd reader as soon as supervise starts pcscd.
+grep -q '^pcsc_reader = true' "${APP:-/apps/gsm-sip-bridge}/config.toml" 2>/dev/null && exit 0
+
 PORT=/dev/ttyUSB3
 OUT=/tmp/gsm-sip-bridge-prestart.out
 

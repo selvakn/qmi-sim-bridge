@@ -1,0 +1,41 @@
+# gsm-sip-bridge: VoWiFi line on the stick's own SIM via at-qmi-bridge's PC/SC
+# mode (pcscd vpcd reader "QMI SIM", port 15990), SIP server mode.
+# Secrets come from .env (env:VAR).
+
+[sip]
+local_port = 5062                  # 5060 is left for the phones
+
+[sip_server]
+enabled = true
+ring_aor = "1001"
+
+[[sip_server.account]]
+username = "1001"
+password = "env:PHONE_1001_PASSWORD"
+
+[cs]
+enabled = false
+
+[vowifi]
+enabled = true
+
+[[vowifi.line]]
+pcsc_reader = true
+# Pin the PLMN so supervise doesn't read it from the card in the instant after
+# it starts pcscd, before at-qmi-bridge has connected to the reader
+# ("FATAL: could not derive MCC/MNC; skipping this line"). EF_AD decides 2 vs 3
+# MNC digits; 3GPP FQDNs (ePDG, IMS realm) need it zero-padded to 3 digits as
+# written here, e.g. Vi India 404 / "043" — "43" builds epdg.epc.mnc43… which
+# does not resolve.
+mcc = "404"
+mnc = "043"
+# The SIM's IMSI: names which reader's card this line owns. Read it with
+# `gsm-sip-bridge pcsc-list` once the reader is up (placeholder below).
+imsi_override = "404000000000000"
+# Optional: the modem's real IMEI (qmicli -p -d /dev/wwan0qmi0 --dms-get-ids).
+# Unset, a stable Luhn-valid IMEI is derived from the IMSI.
+# imei_override = "000000000000000"
+
+[sms]
+enabled = true
+db_path = "/apps/gsm-sip-bridge/data/store.db"

@@ -30,7 +30,11 @@ impl Transport for Uim {
 pub fn cla_for_channel(cla: u8, channel: u8) -> u8 {
     if channel <= 3 {
         // First interindustry (and proprietary 8x) class: b2..b1 = channel.
-        let base = if cla & 0x40 != 0 { cla & 0x80 } else { cla & 0xFC };
+        let base = if cla & 0x40 != 0 {
+            cla & 0x80
+        } else {
+            cla & 0xFC
+        };
         base | channel
     } else {
         // Further interindustry class: b7 = 1, b4..b1 = channel - 4,
@@ -65,7 +69,10 @@ impl<T: Transport> Session<T> {
         }
         let (c, fcp) = self.t.open_channel(self.slot, &self.aid)?;
         self.fcp = fcp;
-        eprintln!("opened logical channel {c} to AID {}", crate::at::hex_encode(&self.aid));
+        eprintln!(
+            "opened logical channel {c} to AID {}",
+            crate::at::hex_encode(&self.aid)
+        );
         self.channel = Some(c);
         Ok(c)
     }
@@ -130,7 +137,11 @@ impl<T: Transport> Session<T> {
         let apdu = if self.selects_session_aid(apdu) {
             if self.channel.is_none() {
                 self.channel()?;
-                let mut r = if apdu[3] & 0x0C == 0x0C { Vec::new() } else { self.fcp.clone() };
+                let mut r = if apdu[3] & 0x0C == 0x0C {
+                    Vec::new()
+                } else {
+                    self.fcp.clone()
+                };
                 r.extend_from_slice(&[0x90, 0x00]);
                 return Ok(r);
             }
@@ -158,7 +169,9 @@ impl<T: Transport> Session<T> {
         }
         data.extend_from_slice(&resp);
         if data.len() < 2 {
-            return Err(QmiError::Malformed("APDU response without status word".into()));
+            return Err(QmiError::Malformed(
+                "APDU response without status word".into(),
+            ));
         }
         Ok(data)
     }
@@ -208,11 +221,21 @@ mod tests {
         f.replies.push_back(Ok(vec![0x98, 0x62]));
         {
             let mut s = Session::new(&mut f, 1, vec![0xA0]);
-            assert_eq!(s.transmit(&[0x00, 0xA4, 0x00, 0x0C, 0x02, 0x3F, 0x00]).unwrap(), [0x90, 0x00]);
-            assert_eq!(s.transmit(&[0x00, 0x88, 0x00, 0x81, 0x00]).unwrap(), [0x98, 0x62]);
+            assert_eq!(
+                s.transmit(&[0x00, 0xA4, 0x00, 0x0C, 0x02, 0x3F, 0x00])
+                    .unwrap(),
+                [0x90, 0x00]
+            );
+            assert_eq!(
+                s.transmit(&[0x00, 0x88, 0x00, 0x81, 0x00]).unwrap(),
+                [0x98, 0x62]
+            );
         }
         assert_eq!(f.opens, 1);
-        assert_eq!(f.sent[0], (1, vec![0x01, 0xA4, 0x00, 0x0C, 0x02, 0x3F, 0x00]));
+        assert_eq!(
+            f.sent[0],
+            (1, vec![0x01, 0xA4, 0x00, 0x0C, 0x02, 0x3F, 0x00])
+        );
         assert_eq!(f.sent[1].1[0], 0x01);
     }
 
@@ -223,7 +246,10 @@ mod tests {
         f.replies.push_back(Ok(vec![0xDB, 0x01, 0x02, 0x90, 0x00]));
         {
             let mut s = Session::new(&mut f, 1, vec![0xA0]);
-            assert_eq!(s.transmit(&[0x00, 0x88, 0x00, 0x81, 0x00]).unwrap(), [0xDB, 0x01, 0x02, 0x90, 0x00]);
+            assert_eq!(
+                s.transmit(&[0x00, 0x88, 0x00, 0x81, 0x00]).unwrap(),
+                [0xDB, 0x01, 0x02, 0x90, 0x00]
+            );
         }
         assert_eq!(f.sent[1], (1, vec![0x01, 0xC0, 0x00, 0x00, 0x03]));
     }
@@ -235,7 +261,10 @@ mod tests {
         f.replies.push_back(Ok(vec![0x90, 0x00]));
         {
             let mut s = Session::new(&mut f, 1, vec![0xA0]);
-            assert_eq!(s.transmit(&[0x00, 0xF2, 0x00, 0x00, 0x00]).unwrap(), [0x90, 0x00]);
+            assert_eq!(
+                s.transmit(&[0x00, 0xF2, 0x00, 0x00, 0x00]).unwrap(),
+                [0x90, 0x00]
+            );
         }
         assert_eq!(f.opens, 2);
         assert_eq!(f.closed, vec![1]);
@@ -248,11 +277,19 @@ mod tests {
         f.replies.push_back(Ok(vec![0x90, 0x00]));
         f.replies.push_back(Ok(vec![0x90, 0x00]));
         {
-            let mut s = Session::new(&mut f, 1, vec![0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x02, 0xFF]);
+            let mut s = Session::new(
+                &mut f,
+                1,
+                vec![0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x02, 0xFF],
+            );
             // First SELECT AID opens the channel and is answered locally.
-            let full = [0x00, 0xA4, 0x04, 0x0C, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x02, 0xFF];
+            let full = [
+                0x00, 0xA4, 0x04, 0x0C, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x02, 0xFF,
+            ];
             assert_eq!(s.transmit(&full).unwrap(), [0x90, 0x00]);
-            let fcp = [0x00, 0xA4, 0x04, 0x04, 0x07, 0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x02];
+            let fcp = [
+                0x00, 0xA4, 0x04, 0x04, 0x07, 0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x02,
+            ];
             s.reset();
             assert_eq!(s.transmit(&fcp).unwrap(), [0x62, 0x00, 0x90, 0x00]);
             // On an open channel it becomes SELECT 7FFF, with the same P2.
@@ -261,7 +298,10 @@ mod tests {
         }
         assert_eq!(f.opens, 2);
         assert_eq!(f.closed, vec![1]);
-        assert_eq!(f.sent[1], (2, vec![0x02, 0xA4, 0x00, 0x0C, 0x02, 0x7F, 0xFF]));
+        assert_eq!(
+            f.sent[1],
+            (2, vec![0x02, 0xA4, 0x00, 0x0C, 0x02, 0x7F, 0xFF])
+        );
     }
 
     #[test]
@@ -270,7 +310,9 @@ mod tests {
         f.replies.push_back(Ok(vec![0x6A, 0x82]));
         {
             let mut s = Session::new(&mut f, 1, vec![0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x02]);
-            let isim = [0x00, 0xA4, 0x04, 0x0C, 0x07, 0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x04];
+            let isim = [
+                0x00, 0xA4, 0x04, 0x0C, 0x07, 0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x04,
+            ];
             assert_eq!(s.transmit(&isim).unwrap(), [0x6A, 0x82]);
         }
         assert_eq!(f.sent.len(), 1);
@@ -279,11 +321,15 @@ mod tests {
     #[test]
     fn reconnects_after_io_error_without_closing() {
         let mut f = Fake::default();
-        f.replies.push_back(Err(QmiError::Io(std::io::ErrorKind::BrokenPipe.into())));
+        f.replies
+            .push_back(Err(QmiError::Io(std::io::ErrorKind::BrokenPipe.into())));
         f.replies.push_back(Ok(vec![0x90, 0x00]));
         {
             let mut s = Session::new(&mut f, 1, vec![0xA0]);
-            assert_eq!(s.transmit(&[0x00, 0xF2, 0x00, 0x00, 0x00]).unwrap(), [0x90, 0x00]);
+            assert_eq!(
+                s.transmit(&[0x00, 0xF2, 0x00, 0x00, 0x00]).unwrap(),
+                [0x90, 0x00]
+            );
         }
         assert_eq!(f.opens, 2);
         assert!(f.closed.is_empty(), "a dead client's channel is not closed");
