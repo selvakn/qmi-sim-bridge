@@ -161,6 +161,48 @@ fn connect_qmi(a: &Args) -> Result<qmi::Uim, qmi::QmiError> {
     qmi::Uim::connect_device(&a.qmi_device)
 }
 
+/// UIM transport that reconnects after the QMI connection dies (qmi-proxy is
+/// restarted whenever ModemManager re-probes the modem).
+struct QmiLink {
+    uim: Option<qmi::Uim>,
+    device: String,
+    proxy: bool,
+}
+
+impl QmiLink {
+    fn with<T>(
+        &mut self,
+        f: impl FnOnce(&mut qmi::Uim) -> Result<T, qmi::QmiError>,
+    ) -> Result<T, qmi::QmiError> {
+        if self.uim.is_none() {
+            let u = if self.proxy {
+                qmi::Uim::connect_proxy(&self.device, Duration::from_secs(15))?
+            } else {
+                qmi::Uim::connect_device(&self.device)?
+            };
+            eprintln!("QMI UIM client {} on {} (reconnected)", u.cid(), self.device);
+            self.uim = Some(u);
+        }
+        let r = f(self.uim.as_mut().expect("connected above"));
+        if matches!(r, Err(qmi::QmiError::Io(_))) {
+            self.uim = None;
+        }
+        r
+    }
+}
+
+impl sim::Transport for QmiLink {
+    fn open_channel(&mut self, slot: u8, aid: &[u8]) -> Result<(u8, Vec<u8>), qmi::QmiError> {
+        self.with(|u| u.open_channel(slot, aid))
+    }
+    fn send_apdu(&mut self, slot: u8, channel: u8, apdu: &[u8]) -> Result<Vec<u8>, qmi::QmiError> {
+        self.with(|u| u.send_apdu(slot, channel, apdu))
+    }
+    fn close_channel(&mut self, slot: u8, channel: u8) -> Result<(), qmi::QmiError> {
+        self.with(|u| u.close_channel(slot, channel))
+    }
+}
+
 fn run(a: Args) -> Result<(), String> {
     let mut modem = OpenOptions::new()
         .read(true)
@@ -184,7 +226,12 @@ fn run(a: Args) -> Result<(), String> {
 
     let uim = connect_qmi(&a).map_err(|e| format!("QMI: {e}"))?;
     eprintln!("QMI UIM client {} on {}", uim.cid(), a.qmi_device);
-    let mut session = sim::Session::new(uim, a.slot, aid);
+    let link = QmiLink {
+        uim: Some(uim),
+        device: a.qmi_device.clone(),
+        proxy: a.proxy,
+    };
+    let mut session = sim::Session::new(link, a.slot, aid);
 
     let pty = pty::open().map_err(|e| format!("openpty: {e}"))?;
     pty::link(&pty.slave_path, &a.link)
@@ -259,8 +306,10 @@ fn run(a: Args) -> Result<(), String> {
     }
     pty::unlink_if_ours(&pty.slave_path, &a.link);
     session.reset();
-    if let Err(e) = session.into_inner().release() {
-        eprintln!("release QMI client: {e}");
+    if let Some(mut u) = session.into_inner().uim {
+        if let Err(e) = u.release() {
+            eprintln!("release QMI client: {e}");
+        }
     }
     Ok(())
 }
@@ -268,7 +317,7 @@ fn run(a: Args) -> Result<(), String> {
 fn handle_line(
     l: &str,
     echo: &mut bool,
-    session: &mut sim::Session<qmi::Uim>,
+    session: &mut sim::Session<QmiLink>,
     modem: &mut File,
     out: &Mutex<File>,
     trace: bool,

@@ -4,8 +4,9 @@
 # gsm-sip-bridge probes its modem port once at startup (5 s budget) and
 # disables VoWiFi for the whole run if the SIM is not ready by then. At boot
 # at-qmi-bridge and the modem come up later than podman, so wait until the
-# pty answers AT+CPIN? with READY (or give up after ~3 minutes and start
-# anyway; the container can be restarted later).
+# pty answers AT+CPIN? with READY *and* AT+CIMI with an IMSI. Right after
+# boot the modem reports READY a little before CIMI works, and discovery
+# needs both. Gives up after ~3 minutes and starts anyway.
 
 PORT=/dev/ttyUSB3
 OUT=/tmp/gsm-sip-bridge-prestart.out
@@ -16,8 +17,11 @@ while [ $i -lt 36 ]; do
 		(timeout 4 cat "$PORT" > "$OUT" &)
 		sleep 1
 		printf 'AT+CPIN?\r' > "$PORT"
-		sleep 3
-		grep -q 'READY' "$OUT" && { echo "SIM ready on $PORT"; exit 0; }
+		sleep 1
+		printf 'AT+CIMI\r' > "$PORT"
+		sleep 2
+		grep -q 'READY' "$OUT" && grep -qE '^[0-9]{15}' "$OUT" &&
+			{ echo "SIM ready on $PORT"; exit 0; }
 	fi
 	sleep 2
 	i=$((i + 1))

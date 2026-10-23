@@ -94,6 +94,14 @@ impl<T: Transport> Session<T> {
                 self.reset();
                 self.transmit_once(apdu)
             }
+            // The QMI connection died (qmi-proxy restarted with ModemManager).
+            // The channel belonged to that client and is gone with it; the
+            // transport reconnects on the next call.
+            Err(QmiError::Io(e)) => {
+                eprintln!("QMI connection lost ({e}); reconnecting");
+                self.channel = None;
+                self.transmit_once(apdu)
+            }
             Err(e) => {
                 self.reset();
                 Err(e)
@@ -266,6 +274,19 @@ mod tests {
             assert_eq!(s.transmit(&isim).unwrap(), [0x6A, 0x82]);
         }
         assert_eq!(f.sent.len(), 1);
+    }
+
+    #[test]
+    fn reconnects_after_io_error_without_closing() {
+        let mut f = Fake::default();
+        f.replies.push_back(Err(QmiError::Io(std::io::ErrorKind::BrokenPipe.into())));
+        f.replies.push_back(Ok(vec![0x90, 0x00]));
+        {
+            let mut s = Session::new(&mut f, 1, vec![0xA0]);
+            assert_eq!(s.transmit(&[0x00, 0xF2, 0x00, 0x00, 0x00]).unwrap(), [0x90, 0x00]);
+        }
+        assert_eq!(f.opens, 2);
+        assert!(f.closed.is_empty(), "a dead client's channel is not closed");
     }
 
     #[test]
