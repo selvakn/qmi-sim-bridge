@@ -100,8 +100,36 @@ and phones register as `1001` on port 5060. `.env` (holding
   `/dev/mqueue`.
 - `openwrt/podman-apps.init` (S99): runs `docker-compose up -d` for each
   `/apps/*` at boot, through podman's Docker API socket.
-- Firewall: rule `devices_voip` accepts UDP from the Wi-Fi LAN zone only. The
-  WAN (LTE) still rejects everything.
+- Firewall: two additions to fw4, below. The WAN (LTE) still rejects everything.
+
+### Firewall (fw4)
+
+```sh
+# Each VoWiFi line runs its IMS agent in a netns, joined to the SIP agent in
+# the host namespace by a veth pair (veth-sip<N> <-> veth-ims<N>, 10.99.0.0/30
+# per line). Interfaces outside any zone fall to fw4's default input policy,
+# REJECT on this box, so the agents' control channel and RTP hop between them
+# need their own zone.
+uci set firewall.gsmbridge=zone
+uci set firewall.gsmbridge.name='gsmbridge'
+uci add_list firewall.gsmbridge.device='veth-sip+'
+uci set firewall.gsmbridge.input='ACCEPT'
+uci set firewall.gsmbridge.output='ACCEPT'
+uci set firewall.gsmbridge.forward='REJECT'
+
+# Phones on the Wi-Fi LAN (zone "devices") reach SIP 5060 and RTP (dynamic
+# ports). UDP only, IPv4, LAN zone only.
+uci set firewall.devices_voip=rule
+uci set firewall.devices_voip.name='Allow-SIP-RTP-devices'
+uci set firewall.devices_voip.src='devices'
+uci set firewall.devices_voip.proto='udp'
+uci set firewall.devices_voip.family='ipv4'
+uci set firewall.devices_voip.target='ACCEPT'
+
+uci commit firewall && /etc/init.d/firewall reload
+```
+
+### Run
 
 ```
 cd /apps/gsm-sip-bridge
