@@ -65,6 +65,9 @@ pub fn write_frame(w: &mut impl Write, p: &[u8]) -> io::Result<()> {
     w.flush()
 }
 
+/// Sends one command APDU to the SIM and returns the full response (data + SW1 SW2).
+pub type Transmit<'a> = dyn FnMut(&[u8]) -> Result<Vec<u8>, String> + 'a;
+
 /// T=0 presentation layer over a transmit function that returns full
 /// responses (data + SW1 SW2).
 #[derive(Default)]
@@ -74,11 +77,7 @@ pub struct Card {
 }
 
 impl Card {
-    pub fn handle(
-        &mut self,
-        msg: Message,
-        transmit: &mut dyn FnMut(&[u8]) -> Result<Vec<u8>, String>,
-    ) -> Option<Vec<u8>> {
+    pub fn handle(&mut self, msg: Message, transmit: &mut Transmit<'_>) -> Option<Vec<u8>> {
         match msg {
             Message::PowerOff => {
                 self.powered = false;
@@ -99,11 +98,7 @@ impl Card {
         }
     }
 
-    fn apdu(
-        &mut self,
-        apdu: &[u8],
-        transmit: &mut dyn FnMut(&[u8]) -> Result<Vec<u8>, String>,
-    ) -> Vec<u8> {
+    fn apdu(&mut self, apdu: &[u8], transmit: &mut Transmit<'_>) -> Vec<u8> {
         if !self.powered {
             return vec![0x6F, 0x00];
         }
@@ -141,7 +136,7 @@ impl Card {
 /// Serves one vpcd connection until it closes.
 pub fn serve(
     stream: &mut (impl Read + Write),
-    transmit: &mut dyn FnMut(&[u8]) -> Result<Vec<u8>, String>,
+    transmit: &mut Transmit<'_>,
     trace: bool,
 ) -> io::Result<()> {
     let mut card = Card::default();
