@@ -1,9 +1,16 @@
 # at-qmi-bridge
 
-Presents a modem's AT port as a serial-like pty (e.g. `/dev/ttyUSB3`) and
-answers `AT+CSIM` (raw SIM APDUs) over QMI UIM logical channels. It is for
-modems whose firmware lacks `AT+CSIM` but whose QMI UIM service can still
-send APDUs.
+Gives software access to a modem's SIM over QMI UIM logical channels, for
+modems whose firmware lacks `AT+CSIM` but whose QMI UIM service can still send
+APDUs. It has two front ends, chosen at startup:
+
+| Mode | Selected by | Presents the SIM as |
+|---|---|---|
+| **AT mode** (original) | default | a serial-like pty (e.g. `/dev/ttyUSB3`) that answers `AT+CSIM` |
+| **PC/SC mode** | `--vpcd <host:port>` | a virtual smart card behind pcscd's vpcd reader |
+
+Both share the same QMI SIM session code (logical channel handling, `61xx`
+chaining, reconnecting to qmi-proxy).
 
 Built for the MSM8916 HiMI HMUF02-V5 4G stick on OpenWrt, so that
 [gsm-sip-bridge](https://github.com/selvakn/gsm-sip-bridge)'s VoWiFi path
@@ -11,7 +18,11 @@ Built for the MSM8916 HiMI HMUF02-V5 4G stick on OpenWrt, so that
 On this modem (`HIMI_U01_MODEM_V1.0`), `AT+CSIM`, `AT+CCHO` and `AT+CGLA` all
 return `+CME ERROR: 4`.
 
-## What it does
+PC/SC mode is the recommended one: it needs no AT port, no fake Quectel USB
+tree and none of the AT emulation below. See the
+[runbook](docs/native-gsm-sip-bridge-runbook.md).
+
+## AT mode
 
 Commands from the pty are forwarded to the real AT port (default
 `/dev/wwan0at1`) unchanged, except for these:
@@ -27,31 +38,77 @@ Commands from the pty are forwarded to the real AT port (default
 
 Modem responses and unsolicited result codes are copied back to the pty as-is.
 
+## PC/SC mode
+
+`--vpcd 127.0.0.1:15963` makes at-qmi-bridge the *card* in a
+[vsmartcard](https://frankmorgner.github.io/vsmartcard/) virtual reader. pcscd
+loads `libifdvpcd` and listens on a TCP port; at-qmi-bridge connects to it and
+answers as the card. PC/SC clients (strongSwan's `eap-sim-pcsc`,
+gsm-sip-bridge's PC/SC transport) then talk to the SIM like any other reader.
+No AT port and no pty are used (`--at` and `--link` are ignored).
+
+- **Framing.** Each message is a 2-byte big-endian length plus payload. A
+  1-byte payload is a control message (`00` power off, `01` power on, `02`
+  reset, `04` get ATR); anything longer is a command APDU, answered with the
+  response APDU. The ATR is the minimal `3B 00`. APDUs sent while the card is
+  powered off get `6F00`.
+- **T=0 presentation.** Clients expect classic T=0, but QMI returns data and
+  status word together. For SELECT (`A4`) and INTERNAL AUTHENTICATE (`88`)
+  answers that carry data and end in `9000`, the bridge replies `61xx` and
+  serves the cached data on the following GET RESPONSE (`C0`), which never
+  reaches the SIM. Everything else passes through unchanged.
+- **USIM channel.** The channel is opened by the USIM AID, which is the 7-byte
+  prefix `A0000000871002` unless `--aid` is given (`AT+CUAD` discovery needs
+  the AT port, so it isn't used here). SELECT-by-AID handling and the
+  `SELECT 7FFF` re-select trick are the same as in AT mode.
+- **Reconnecting.** pcscd is started and restarted by gsm-sip-bridge's
+  `supervise`, so the bridge retries the TCP connection every 300 ms until the
+  listener appears, and again 1 s after a connection drops.
+- **Reader config.** pcscd needs a vpcd reader with a `FRIENDLYNAME` other
+  than `Virtual PCD`, because gsm-sip-bridge skips readers with that name.
+  `openwrt/qmisim.reader.conf` is the reference (`QMI SIM`, port `0x3E5B` =
+  15963); `deploy/native/gsm-sip-bridge.init` writes it automatically when the
+  config has `pcsc_reader = true`.
+- **gsm-sip-bridge config.** `pcsc_reader = true` plus `imsi_override` (and
+  `mcc`/`mnc`, `imei_override`) in the `[[vowifi.line]]`; see
+  `deploy/native/config.pcsc.toml`.
+
+## QMI
+
 QMI goes through libqmi's `qmi-proxy` (the abstract socket `qmi-proxy`), so it
-coexists with ModemManager. If the proxy is not running, the bridge opens the
+coexists with ModemManager (in AT mode, the udev rule
+`openwrt/77-mm-at-qmi-bridge.rules` also keeps ModemManager off `wwan0at1`). If the proxy is not running, the bridge opens the
 QMI device directly. One UIM client is held for the process lifetime, because a
 logical channel belongs to the client that opened it. The modem rejects APDUs on
 the basic channel (0).
 
-At startup the USIM AID is discovered from `AT+CUAD` (EF_DIR). It can be
-overridden with `--aid`.
+In AT mode the USIM AID is discovered at startup from `AT+CUAD` (EF_DIR). It can
+be overridden with `--aid` in both modes.
 
 ## Usage
 
 ```
 at-qmi-bridge [--at /dev/wwan0at1] [--qmi /dev/wwan0qmi0] [--link /dev/ttyUSB3]
-              [--slot 1] [--aid <hex>] [--no-proxy]
+              [--slot 1] [--aid <hex>] [--no-proxy] [--proxy-wait 120]
+              [--trace] [--vpcd <host:port>]
 ```
 
+`--proxy-wait` is how many seconds to wait for `qmi-proxy` before opening the
+QMI device directly. `--trace` logs every AT line (AT mode) or vpcd message
+(PC/SC mode). `--vpcd` switches to PC/SC mode.
+
 The bridge logs to stderr. On SIGTERM it closes the channel, releases the QMI
-client and removes the symlink. It exits if the AT port goes away (modem
+client and removes the symlink. In AT mode it exits if the AT port goes away (modem
 restart); procd respawns it.
 
 ## Build (static arm64 musl)
 
 ```
-cargo test --release
-cargo build --release --target aarch64-unknown-linux-musl
+make test          # unit tests
+make arm64         # cargo build --release --target aarch64-unknown-linux-musl -> dist/
+make arm64-docker  # same, inside rust:1-alpine on an arm64 host
+make deploy STICK=root@stick
+make help          # all targets
 ```
 
 The only dependency is `libc`. The release binary is about 450 KB, with about
@@ -69,22 +126,47 @@ ssh root@stick 'chmod 755 /usr/sbin/at-qmi-bridge /etc/init.d/at-qmi-bridge &&
 logread -e at-qmi-bridge
 ```
 
-Then point gsm-sip-bridge at it:
+Options live in `/etc/config/at-qmi-bridge` (`enabled`, `at`, `qmi`, `link`,
+`slot`, `aid`, `trace`, `vpcd`). Setting `vpcd` selects PC/SC mode.
+
+AT mode: also install `openwrt/77-mm-at-qmi-bridge.rules` as
+`/lib/udev/rules.d/77-mm-at-qmi-bridge.rules` and restart ModemManager, then
+point gsm-sip-bridge at the pty:
 
 ```toml
 [[vowifi.line]]
 modem_port = "/dev/ttyUSB3"
 ```
 
+PC/SC mode: set the option and restart; the reader entry and the gsm-sip-bridge
+line are covered by the runbook.
+
+```sh
+uci set at-qmi-bridge.main.vpcd=127.0.0.1:15963
+uci commit at-qmi-bridge && /etc/init.d/at-qmi-bridge restart
+```
+
+```toml
+[[vowifi.line]]
+pcsc_reader = true
+mcc = "404"
+mnc = "043"
+imsi_override = "<IMSI>"
+```
+
 ## Verified on hardware (HMUF02-V5, Vi India SIM)
 
-Each step went through the pty: SELECT MF, then EF_DIR, then READ RECORD (the
+AT mode: each step went through the pty: SELECT MF, then EF_DIR, then READ RECORD (the
 USIM AID), then SELECT USIM by AID, then AUTHENTICATE (3G context). With dummy
 RAND/AUTN, AUTHENTICATE returns `9862` (MAC failure), which is the card doing a
 real AKA check. Also verified: EF_IMSI read, STATUS, `AT+QCFG="ims"`,
 `AT+CFUN=0` interception, and passthrough of `AT+CIMI` and `AT+CSQ`.
 
-## Deploying gsm-sip-bridge on the stick
+PC/SC mode: `gsm-sip-bridge pcsc-list` shows the `QMI SIM` reader with the
+card's IMSI, the ePDG tunnel comes up, and IMS REGISTER returns `200 OK` within
+about 10 s of the service starting.
+
+## Deploying gsm-sip-bridge on the stick (Podman, AT mode)
 
 `deploy/gsm-sip-bridge/` holds the compose app that lives in
 `/apps/gsm-sip-bridge` on the stick. It runs VoWiFi only, in SIP server mode,
@@ -146,9 +228,9 @@ DOCKER_HOST=unix:///run/podman/podman.sock docker-compose up -d
 podman exec gsm-sip-bridge gsm-sip-bridge --config /etc/gsm-sip-bridge/config.toml vowifi-status
 ```
 
-## Running gsm-sip-bridge natively (no podman)
+## Running gsm-sip-bridge natively (no podman; AT or PC/SC mode)
 
-The full step-by-step setup is in [docs/native-gsm-sip-bridge-runbook.md](docs/native-gsm-sip-bridge-runbook.md). Summary:
+The full step-by-step setup, including PC/SC mode, is in [docs/native-gsm-sip-bridge-runbook.md](docs/native-gsm-sip-bridge-runbook.md). Summary:
 
 Stopping the gsm-sip-bridge container repeatedly crashed the stick's kernel
 (see the kernel-issue draft), so `deploy/native/` runs it as plain processes
@@ -159,7 +241,7 @@ C=$(podman create ghcr.io/selvakn/gsm-sip-bridge:8.22.0)
 podman export $C | tar -x -C /overlay/gsm-sip-bridge-root && podman rm $C
 scp -O deploy/native/gsm-sip-bridge.init root@stick:/etc/init.d/gsm-sip-bridge
 scp -O deploy/native/run-native         root@stick:/apps/gsm-sip-bridge/run-native
-scp -O deploy/native/config.toml        root@stick:/apps/gsm-sip-bridge/config.toml   # db_path under /apps
+scp -O deploy/native/config.pcsc.toml   root@stick:/apps/gsm-sip-bridge/config.toml   # PC/SC mode; config.toml for AT mode
 /etc/init.d/podman-apps disable; /etc/init.d/gsm-sip-bridge enable; /etc/init.d/gsm-sip-bridge start
 logread -e run-native
 ```
@@ -180,7 +262,10 @@ What the init script does on start (all idempotent):
   image's userland and logs `ip` errors (`logread -e ims.updown`).
 - Adds `/usr/bin/ip -> /sbin/ip` for `ip netns exec` run with an empty `PATH`.
 - Bind-mounts `fake-usb/` read-only over `/sys/bus/usb/devices`. It's empty on the
-  stick, because the stick is a USB gadget and not a host.
+  stick, because the stick is a USB gadget and not a host. Only AT mode needs it (for
+  modem discovery), but the script does it in both modes.
+- PC/SC mode (config has `pcsc_reader = true`): points pcscd's `reader.conf.d/vpcd`
+  at `/dev/null` and writes the `QMI SIM` reader entry (port 15963).
 
 `run-native` runs `prestart`, loads `.env`, puts the unpacked tree first on
 `PATH` and `LD_LIBRARY_PATH` (both sides use musl 1.2.5), and execs
