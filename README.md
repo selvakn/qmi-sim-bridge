@@ -1,5 +1,9 @@
 # at-qmi-bridge
 
+> ⚠️ **Educational and personal/hobbyist use only.** Using a SIM outside its
+> carrier-provided device may breach your carrier's terms. Read the
+> [disclaimer](#disclaimer) first.
+
 > [!WARNING]
 > **Work in progress.** This is experimental software, built for one modem
 > (HiMI HMUF02-V5 / `HIMI_U01_MODEM_V1.0`) and tested only with one carrier's
@@ -290,3 +294,35 @@ set -a; . /apps/gsm-sip-bridge/.env; set +a
 LD_LIBRARY_PATH=/overlay/gsm-sip-bridge-root/usr/lib /overlay/gsm-sip-bridge-root/usr/local/bin/gsm-sip-bridge \
   --config /apps/gsm-sip-bridge/config.toml vowifi-status
 ```
+
+<a id="disclaimer"></a>
+
+## ⚠️ Disclaimer
+
+**This project is for educational and personal/hobbyist purposes only.** It is
+not intended for, and must not be used in, any commercial product, service, or
+deployment.
+
+It exposes a SIM to software other than the modem's own firmware, mainly to
+feed [gsm-sip-bridge](https://github.com/selvakn/gsm-sip-bridge), which bridges
+cellular calls to SIP/VoIP. That use can be subject to telecom regulations and
+your cellular provider's terms of service, including restrictions on unlicensed
+gateways / "SIM boxes" and call-traffic bypass, which are illegal in many
+countries. **Check your local laws and your provider's terms before using it.**
+See also gsm-sip-bridge's
+[full disclaimer](https://github.com/selvakn/gsm-sip-bridge#disclaimer), which
+applies to the setups described here.
+
+**You use this software entirely at your own risk.** It is provided "AS IS",
+without warranty of any kind (see [LICENSE](LICENSE)). The author and
+contributors are not responsible for any damage, loss, fines, SIM lock-out,
+service or account termination, legal liability, or other harm arising from its
+use, misuse, or inability to use.
+
+This project is not affiliated with, endorsed by, or sponsored by Quectel,
+HiMI, OpenWrt, or any cellular carrier; product names are used solely to
+describe interoperability.
+
+Exposing the SIP server or RTP media of the deployments described here to an
+untrusted network is a toll-fraud risk. Securing those endpoints (firewalling,
+authentication) is entirely the operator's responsibility.
