@@ -1,5 +1,14 @@
 # at-qmi-bridge
 
+> [!WARNING]
+> **Work in progress.** This is experimental software, built for one modem
+> (HiMI HMUF02-V5 / `HIMI_U01_MODEM_V1.0`) and tested only with one carrier's
+> SIM (Vi India). Interfaces, options and the deploy scripts may change without
+> notice. It sends raw APDUs to your SIM and works around firmware bugs, so
+> expect rough edges, and use it on a SIM you can afford to have locked. Several
+> parts of the setup (firewall rules, podman and kernel workarounds) are
+> specific to this stick's OpenWrt build. No warranty; see the license.
+
 Gives software access to a modem's SIM over QMI UIM logical channels, for
 modems whose firmware lacks `AT+CSIM` but whose QMI UIM service can still send
 APDUs. It has two front ends, chosen at startup:
@@ -167,6 +176,11 @@ card's IMSI, the ePDG tunnel comes up, and IMS REGISTER returns `200 OK` within
 about 10 s of the service starting.
 
 ## Deploying gsm-sip-bridge on the stick (Podman, AT mode)
+
+> [!WARNING]
+> Work in progress. Stopping the container has crashed this stick's kernel (see
+> the native section below), and the firewall changes open SIP/RTP to the LAN.
+> Review each step before applying it.
 
 `deploy/gsm-sip-bridge/` holds the compose app that lives in
 `/apps/gsm-sip-bridge` on the stick. It runs VoWiFi only, in SIP server mode,
