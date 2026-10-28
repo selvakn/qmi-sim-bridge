@@ -3,7 +3,7 @@ name = "at-qmi-bridge"
 version = "0.1.0"
 edition = "2021"
 description = "Exposes a modem AT port as a pty, serving AT+CSIM over QMI UIM logical channels"
-license = "MIT"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 libc = "0.2"

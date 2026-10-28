@@ -2,3 +2,4 @@
 /dist
 deploy/*/.env
 deploy/*/data/
+.aide.yaml
