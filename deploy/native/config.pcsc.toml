@@ -1,5 +1,5 @@
 # gsm-sip-bridge: VoWiFi line on the stick's own SIM via at-qmi-bridge's PC/SC
-# mode (pcscd vpcd reader "QMI SIM", port 15990), SIP server mode.
+# mode (pcscd vpcd reader "QMI SIM", port 15963), SIP server mode.
 # Secrets come from .env (env:VAR).
 
 [sip]
