@@ -1,8 +1,8 @@
-# at-qmi-bridge build helpers.
+# qmi-sim-bridge build helpers.
 TARGET   ?= aarch64-unknown-linux-musl
 DIST     ?= dist/aarch64-linux-musl
 STICK    ?= root@stick
-BIN      := at-qmi-bridge
+BIN      := qmi-sim-bridge
 
 .PHONY: all build release test fmt fmt-check clippy check arm64 arm64-docker deploy clean help
 

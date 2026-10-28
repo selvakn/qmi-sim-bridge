@@ -1,8 +1,8 @@
 [package]
-name = "at-qmi-bridge"
+name = "qmi-sim-bridge"
 version = "0.1.0"
 edition = "2021"
-description = "Exposes a modem AT port as a pty, serving AT+CSIM over QMI UIM logical channels"
+description = "Exposes a modem SIM over QMI UIM logical channels, as an AT+CSIM pty or a PC/SC virtual card"
 license = "GPL-3.0-or-later"
 
 [dependencies]

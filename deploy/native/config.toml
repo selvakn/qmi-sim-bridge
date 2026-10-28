@@ -21,7 +21,7 @@ enabled = false
 enabled = true
 
 [[vowifi.line]]
-# at-qmi-bridge's pty (see fake-usb/ in docker-compose.yml).
+# qmi-sim-bridge's pty (see fake-usb/ in docker-compose.yml).
 modem_port = "/dev/ttyUSB3"
 
 [sms]

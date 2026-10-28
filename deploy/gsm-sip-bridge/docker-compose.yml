@@ -3,7 +3,7 @@
 # VoWiFi-only, SIP server mode: phones on the Wi-Fi LAN register to the
 # bridge, inbound mobile calls ring account 1001.
 #
-# The SIM is reached through at-qmi-bridge (/dev/ttyUSB3, a pty serving
+# The SIM is reached through qmi-sim-bridge (/dev/ttyUSB3, a pty serving
 # AT+CSIM over QMI). gsm-sip-bridge only discovers modems by walking
 # /sys/bus/usb/devices for Quectel IDs, so ./fake-usb describes one
 # "EC200" (AT-only, VoWiFi-only) whose AT port is ttyUSB3.

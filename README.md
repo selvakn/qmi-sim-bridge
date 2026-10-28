@@ -1,4 +1,4 @@
-# at-qmi-bridge
+# qmi-sim-bridge
 
 > ⚠️ **Educational and personal/hobbyist use only.** Using a SIM outside its
 > carrier-provided device may breach your carrier's terms. Read the
@@ -12,6 +12,11 @@
 > expect rough edges, and use it on a SIM you can afford to have locked. Several
 > parts of the setup (firewall rules, podman and kernel workarounds) are
 > specific to this stick's OpenWrt build. No warranty; see the license.
+
+> Formerly `at-qmi-bridge`. On a stick that has the old name installed, remove
+> `/usr/sbin/at-qmi-bridge`, `/etc/init.d/at-qmi-bridge` (run `disable` first)
+> and `/lib/udev/rules.d/77-mm-at-qmi-bridge.rules`, and move
+> `/etc/config/at-qmi-bridge` to `/etc/config/qmi-sim-bridge`.
 
 Gives software access to a modem's SIM over QMI UIM logical channels, for
 modems whose firmware lacks `AT+CSIM` but whose QMI UIM service can still send
@@ -53,9 +58,9 @@ Modem responses and unsolicited result codes are copied back to the pty as-is.
 
 ## PC/SC mode
 
-`--vpcd 127.0.0.1:15963` makes at-qmi-bridge the *card* in a
+`--vpcd 127.0.0.1:15963` makes qmi-sim-bridge the *card* in a
 [vsmartcard](https://frankmorgner.github.io/vsmartcard/) virtual reader. pcscd
-loads `libifdvpcd` and listens on a TCP port; at-qmi-bridge connects to it and
+loads `libifdvpcd` and listens on a TCP port; qmi-sim-bridge connects to it and
 answers as the card. PC/SC clients (strongSwan's `eap-sim-pcsc`,
 gsm-sip-bridge's PC/SC transport) then talk to the SIM like any other reader.
 No AT port and no pty are used (`--at` and `--link` are ignored).
@@ -90,7 +95,7 @@ No AT port and no pty are used (`--at` and `--link` are ignored).
 
 QMI goes through libqmi's `qmi-proxy` (the abstract socket `qmi-proxy`), so it
 coexists with ModemManager (in AT mode, the udev rule
-`openwrt/77-mm-at-qmi-bridge.rules` also keeps ModemManager off `wwan0at1`). If the proxy is not running, the bridge opens the
+`openwrt/77-mm-qmi-sim-bridge.rules` also keeps ModemManager off `wwan0at1`). If the proxy is not running, the bridge opens the
 QMI device directly. One UIM client is held for the process lifetime, because a
 logical channel belongs to the client that opened it. The modem rejects APDUs on
 the basic channel (0).
@@ -101,7 +106,7 @@ be overridden with `--aid` in both modes.
 ## Usage
 
 ```
-at-qmi-bridge [--at /dev/wwan0at1] [--qmi /dev/wwan0qmi0] [--link /dev/ttyUSB3]
+qmi-sim-bridge [--at /dev/wwan0at1] [--qmi /dev/wwan0qmi0] [--link /dev/ttyUSB3]
               [--slot 1] [--aid <hex>] [--no-proxy] [--proxy-wait 120]
               [--trace] [--vpcd <host:port>]
 ```
@@ -131,19 +136,19 @@ output is in `dist/aarch64-linux-musl/`.
 ## Install on OpenWrt
 
 ```
-scp -O at-qmi-bridge                   root@stick:/usr/sbin/at-qmi-bridge
-scp -O openwrt/at-qmi-bridge.init      root@stick:/etc/init.d/at-qmi-bridge
-scp -O openwrt/at-qmi-bridge.config    root@stick:/etc/config/at-qmi-bridge
-ssh root@stick 'chmod 755 /usr/sbin/at-qmi-bridge /etc/init.d/at-qmi-bridge &&
-  /etc/init.d/at-qmi-bridge enable && /etc/init.d/at-qmi-bridge start'
-logread -e at-qmi-bridge
+scp -O qmi-sim-bridge                   root@stick:/usr/sbin/qmi-sim-bridge
+scp -O openwrt/qmi-sim-bridge.init      root@stick:/etc/init.d/qmi-sim-bridge
+scp -O openwrt/qmi-sim-bridge.config    root@stick:/etc/config/qmi-sim-bridge
+ssh root@stick 'chmod 755 /usr/sbin/qmi-sim-bridge /etc/init.d/qmi-sim-bridge &&
+  /etc/init.d/qmi-sim-bridge enable && /etc/init.d/qmi-sim-bridge start'
+logread -e qmi-sim-bridge
 ```
 
-Options live in `/etc/config/at-qmi-bridge` (`enabled`, `at`, `qmi`, `link`,
+Options live in `/etc/config/qmi-sim-bridge` (`enabled`, `at`, `qmi`, `link`,
 `slot`, `aid`, `trace`, `vpcd`). Setting `vpcd` selects PC/SC mode.
 
-AT mode: also install `openwrt/77-mm-at-qmi-bridge.rules` as
-`/lib/udev/rules.d/77-mm-at-qmi-bridge.rules` and restart ModemManager, then
+AT mode: also install `openwrt/77-mm-qmi-sim-bridge.rules` as
+`/lib/udev/rules.d/77-mm-qmi-sim-bridge.rules` and restart ModemManager, then
 point gsm-sip-bridge at the pty:
 
 ```toml
@@ -155,8 +160,8 @@ PC/SC mode: set the option and restart; the reader entry and the gsm-sip-bridge
 line are covered by the runbook.
 
 ```sh
-uci set at-qmi-bridge.main.vpcd=127.0.0.1:15963
-uci commit at-qmi-bridge && /etc/init.d/at-qmi-bridge restart
+uci set qmi-sim-bridge.main.vpcd=127.0.0.1:15963
+uci commit qmi-sim-bridge && /etc/init.d/qmi-sim-bridge restart
 ```
 
 ```toml

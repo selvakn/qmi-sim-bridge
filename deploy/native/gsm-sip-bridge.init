@@ -38,9 +38,9 @@ relink_root() {
 # userland in the script and log ip errors instead of discarding them.
 patch_updown() {
 	local u="$ROOT/etc/strongswan.d/ims.updown"
-	grep -q "at-qmi-bridge native" "$u" && return 0
+	grep -q "qmi-sim-bridge native" "$u" && return 0
 	[ -f "$u.orig" ] || cp "$u" "$u.orig"
-	sed -i "2i # at-qmi-bridge native deployment: charon passes no usable PATH; pin the image userland.\nPATH=$ROOT/usr/sbin:$ROOT/usr/bin:$ROOT/sbin:$ROOT/bin:/usr/sbin:/usr/bin:/sbin:/bin\nLD_LIBRARY_PATH=$ROOT/usr/lib:$ROOT/lib\nexport PATH LD_LIBRARY_PATH" "$u"
+	sed -i "2i # qmi-sim-bridge native deployment: charon passes no usable PATH; pin the image userland.\nPATH=$ROOT/usr/sbin:$ROOT/usr/bin:$ROOT/sbin:$ROOT/bin:/usr/sbin:/usr/bin:/sbin:/bin\nLD_LIBRARY_PATH=$ROOT/usr/lib:$ROOT/lib\nexport PATH LD_LIBRARY_PATH" "$u"
 	sed -i 's| 2>/dev/null \|\| true| 2>\&1 \| logger -t ims.updown \|\| true|' "$u"
 }
 

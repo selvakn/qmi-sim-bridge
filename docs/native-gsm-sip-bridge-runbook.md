@@ -18,7 +18,7 @@ Container teardown just reliably exposed it. Run natively, the same workload has
 
 | | **PC/SC mode (recommended)** | AT mode (original) |
 |---|---|---|
-| at-qmi-bridge | `--vpcd 127.0.0.1:15963`: the virtual card behind pcscd's vpcd reader, renamed `QMI SIM` | pty at `/dev/ttyUSB3` pretending to be a Quectel AT port |
+| qmi-sim-bridge | `--vpcd 127.0.0.1:15963`: the virtual card behind pcscd's vpcd reader, renamed `QMI SIM` | pty at `/dev/ttyUSB3` pretending to be a Quectel AT port |
 | gsm-sip-bridge line | `pcsc_reader = true` + `imsi_override` (+ `mcc`/`mnc`, `imei_override`) | `modem_port = "/dev/ttyUSB3"` |
 | AT port use | none (QMI only) | `wwan0at1`, shared with ModemManager |
 | Workarounds needed | reader rename | fake-usb sysfs, `AT+CGSN`/`QCFG`/`CFUN` emulation, `prestart` SIM wait, ModemManager port-ignore rule |
@@ -30,8 +30,8 @@ restart. AT mode is still documented below.
 
 ### PC/SC mode setup
 
-1. at-qmi-bridge in PC/SC mode:
-   `uci set at-qmi-bridge.main.vpcd=127.0.0.1:15963; uci commit at-qmi-bridge; /etc/init.d/at-qmi-bridge restart`.
+1. qmi-sim-bridge in PC/SC mode:
+   `uci set qmi-sim-bridge.main.vpcd=127.0.0.1:15963; uci commit qmi-sim-bridge; /etc/init.d/qmi-sim-bridge restart`.
    It retries the connection every 300 ms until pcscd (started by supervise) listens.
 2. `config.toml` from `deploy/native/config.pcsc.toml`, with the real IMSI (`mmcli -i any`) and IMEI
    (`qmicli -p -d /dev/wwan0qmi0 --dms-get-ids`) filled in on the stick only:
@@ -44,7 +44,7 @@ restart. AT mode is still documented below.
    imei_override = "<IMEI>"
    ```
    Pinning `mcc`/`mnc` avoids supervise reading them from the card the instant it starts pcscd, before
-   at-qmi-bridge has connected ("FATAL: could not derive MCC/MNC; skipping this line").
+   qmi-sim-bridge has connected ("FATAL: could not derive MCC/MNC; skipping this line").
 3. The init script's `setup_pcsc_reader` runs when the config has `pcsc_reader = true`:
    - points `$ROOT/etc/reader.conf.d/vpcd` (rewritten by supervise at every start as "Virtual PCD") at `/dev/null`;
    - writes `$ROOT/etc/reader.conf.d/qmisim`: one vpcd reader named `QMI SIM` on port 15963 (`0x3E5B`).
@@ -58,7 +58,7 @@ Verify:
 ```sh
 LD_LIBRARY_PATH=$ROOT/usr/lib:$ROOT/lib $ROOT/usr/local/bin/gsm-sip-bridge --config $APP/config.toml pcsc-list
 #   QMI SIM 00 00   ok   <imsi>   404   043   <carrier>
-logread -e at-qmi-bridge     # vpcd: connected to 127.0.0.1:15963
+logread -e qmi-sim-bridge     # vpcd: connected to 127.0.0.1:15963
 ```
 
 On Vi India the tunnel comes up and REGISTER returns `200 OK` within about 10 s of the service starting.
@@ -75,19 +75,19 @@ phones (Wi-Fi LAN / VPN) --SIP 5060/udp--> gsm-sip-bridge supervise   (host netn
                                                    │
                              /dev/ttyUSB3  (pty) ──┘
                                    │
-                            at-qmi-bridge  ── AT ──> /dev/wwan0at1
+                            qmi-sim-bridge  ── AT ──> /dev/wwan0at1
                                            ── QMI UIM (via qmi-proxy) ──> modem SIM
 ```
 
-The modem (`HIMI_U01_MODEM_V1.0`) has no `AT+CSIM`, so at-qmi-bridge (this repo) provides one over QMI UIM logical
+The modem (`HIMI_U01_MODEM_V1.0`) has no `AT+CSIM`, so qmi-sim-bridge (this repo) provides one over QMI UIM logical
 channels. See the [README](../README.md) for what it answers itself.
 
 ## Files on the stick
 
 | Path | What | Source in this repo |
 |---|---|---|
-| `/usr/sbin/at-qmi-bridge` | AT/QMI bridge binary (static arm64 musl) | `dist/aarch64-linux-musl/at-qmi-bridge` |
-| `/etc/init.d/at-qmi-bridge`, `/etc/config/at-qmi-bridge` | its procd service (S96) and uci options | `openwrt/` |
+| `/usr/sbin/qmi-sim-bridge` | AT/QMI bridge binary (static arm64 musl) | `dist/aarch64-linux-musl/qmi-sim-bridge` |
+| `/etc/init.d/qmi-sim-bridge`, `/etc/config/qmi-sim-bridge` | its procd service (S96) and uci options | `openwrt/` |
 | `/overlay/gsm-sip-bridge-root/` | the gsm-sip-bridge image's root filesystem, unpacked (~40 MB) | from `ghcr.io/selvakn/gsm-sip-bridge:<tag>` |
 | `/etc/init.d/gsm-sip-bridge` | native procd service (S99) | `deploy/native/gsm-sip-bridge.init` |
 | `/apps/gsm-sip-bridge/run-native` | launcher | `deploy/native/run-native` |
@@ -132,24 +132,24 @@ uci set firewall.devices_voip.target='ACCEPT'
 uci commit firewall && /etc/init.d/firewall reload
 ```
 
-## 3. Install at-qmi-bridge
+## 3. Install qmi-sim-bridge
 
 Build it (`cargo build --release --target aarch64-unknown-linux-musl`, or natively in `rust:1-alpine` on an arm64
 host), then:
 
 ```sh
-scp -O dist/aarch64-linux-musl/at-qmi-bridge root@stick:/usr/sbin/at-qmi-bridge
-scp -O openwrt/at-qmi-bridge.init            root@stick:/etc/init.d/at-qmi-bridge
-scp -O openwrt/at-qmi-bridge.config          root@stick:/etc/config/at-qmi-bridge
-ssh root@stick 'chmod 755 /usr/sbin/at-qmi-bridge /etc/init.d/at-qmi-bridge
-  /etc/init.d/at-qmi-bridge enable && /etc/init.d/at-qmi-bridge start
-  logread -e at-qmi-bridge | tail -3'
+scp -O dist/aarch64-linux-musl/qmi-sim-bridge root@stick:/usr/sbin/qmi-sim-bridge
+scp -O openwrt/qmi-sim-bridge.init            root@stick:/etc/init.d/qmi-sim-bridge
+scp -O openwrt/qmi-sim-bridge.config          root@stick:/etc/config/qmi-sim-bridge
+ssh root@stick 'chmod 755 /usr/sbin/qmi-sim-bridge /etc/init.d/qmi-sim-bridge
+  /etc/init.d/qmi-sim-bridge enable && /etc/init.d/qmi-sim-bridge start
+  logread -e qmi-sim-bridge | tail -3'
 ```
 
 Expected log: `QMI UIM client N on /dev/wwan0qmi0` and `serving /dev/ttyUSB3 -> /dev/pts/0`. At boot it waits up to
 120 s for ModemManager's `qmi-proxy`.
 
-To replace a running binary, copy it to `at-qmi-bridge.new`, then `mv` it over (`scp` onto a running binary fails
+To replace a running binary, copy it to `qmi-sim-bridge.new`, then `mv` it over (`scp` onto a running binary fails
 with "Text file busy"), then restart the service.
 
 ## 4. Unpack the gsm-sip-bridge image
@@ -200,7 +200,7 @@ enabled = false                    # no Quectel audio path; every call is VoWiFi
 enabled = true
 
 [[vowifi.line]]
-modem_port = "/dev/ttyUSB3"        # at-qmi-bridge's pty
+modem_port = "/dev/ttyUSB3"        # qmi-sim-bridge's pty
 
 [sms]
 enabled = true
@@ -265,9 +265,9 @@ number ring that account. Dial-out needs `[outbound] enabled = true`.
 
 | Task | Command |
 |---|---|
-| Logs | `logread -e run-native`, `/tmp/ims-agent-0.out`, `/tmp/charon.log`, `logread -e at-qmi-bridge` |
+| Logs | `logread -e run-native`, `/tmp/ims-agent-0.out`, `/tmp/charon.log`, `logread -e qmi-sim-bridge` |
 | Stop / start | `/etc/init.d/gsm-sip-bridge stop` / `start`. The stop is asynchronous, so wait until `pidof charon` is empty before starting again |
-| Trace AT traffic | `uci set at-qmi-bridge.main.trace=1; uci commit; /etc/init.d/at-qmi-bridge restart` (noisy: the SMS sweep polls every ~20 s) |
+| Trace AT traffic | `uci set qmi-sim-bridge.main.trace=1; uci commit; /etc/init.d/qmi-sim-bridge restart` (noisy: the SMS sweep polls every ~20 s) |
 | Upgrade the image | stop the service, remove `/overlay/gsm-sip-bridge-root`, repeat §4, start. The relink and updown patch re-apply themselves |
 | Disable VoWiFi | `/etc/init.d/gsm-sip-bridge disable; /etc/init.d/gsm-sip-bridge stop` |
 
@@ -276,11 +276,11 @@ number ring that account. Dial-out needs `[outbound] enabled = true`.
 | Symptom | Cause / fix |
 |---|---|
 | `swanctl --list-sas failed (vici connection broken)`, then `NO_ADDITIONAL_SAS` in a loop | absolute busybox symlinks resolve to the host. Delete `$ROOT/.relinked` and restart |
-| IMS agent: `TCP connect to [<P-CSCF>]:5060 failed: Host is unreachable` | inner address missing on `tun23-0`. Check that the `ims.updown` patch is present (`grep "at-qmi-bridge native" $ROOT/etc/strongswan.d/ims.updown`) and read `logread -e ims.updown` |
+| IMS agent: `TCP connect to [<P-CSCF>]:5060 failed: Host is unreachable` | inner address missing on `tun23-0`. Check that the `ims.updown` patch is present (`grep "qmi-sim-bridge native" $ROOT/etc/strongswan.d/ims.updown`) and read `logread -e ims.updown` |
 | `discover: LINE_COUNT=0`, `sim_unreadable: AT+CIMI: no IMSI` | SIM not ready at discovery. Check `prestart`, then restart the service |
-| `vowifi-ims-agent exited` loop with `AT command timeout` | the modem's `AT+CGSN` never sends `OK`. at-qmi-bridge must rewrite it to `AT+GSN` (any current build does) |
-| `AT+CSIM failed: ERROR`, at-qmi-bridge logs `Broken pipe` | qmi-proxy restarted (ModemManager re-probe). Current at-qmi-bridge reconnects by itself; restart it if it's an old build |
-| LTE gone (`mmcli -L`: no modem) after VoWiFi starts | an old at-qmi-bridge that reopens the SIM channel per SELECT/CFUN. Upgrade it, then `/etc/init.d/modemmanager restart` |
+| `vowifi-ims-agent exited` loop with `AT command timeout` | the modem's `AT+CGSN` never sends `OK`. qmi-sim-bridge must rewrite it to `AT+GSN` (any current build does) |
+| `AT+CSIM failed: ERROR`, qmi-sim-bridge logs `Broken pipe` | qmi-proxy restarted (ModemManager re-probe). Current qmi-sim-bridge reconnects by itself; restart it if it's an old build |
+| LTE gone (`mmcli -L`: no modem) after VoWiFi starts | an old qmi-sim-bridge that reopens the SIM channel per SELECT/CFUN. Upgrade it, then `/etc/init.d/modemmanager restart` |
 | `vowifi-status`: `secret variable PHONE_1001_PASSWORD is unset` | the CLI needs `.env` loaded (`set -a; . .env; set +a`) |
 | No calls, or control-channel timeouts | fw4 `gsmbridge` zone missing (§2) |
 

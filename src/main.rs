@@ -1,4 +1,4 @@
-//! at-qmi-bridge: present a modem's AT port as a serial-like pty and answer
+//! qmi-sim-bridge: present a modem's AT port as a serial-like pty and answer
 //! `AT+CSIM` (raw SIM APDUs) over QMI UIM, for modems whose firmware lacks
 //! `AT+CSIM` but whose QMI UIM service supports logical channels.
 //!
@@ -47,7 +47,7 @@ struct Args {
 }
 
 const USAGE: &str = "\
-Usage: at-qmi-bridge [options]
+Usage: qmi-sim-bridge [options]
 
   --at <path>      modem AT port              (default /dev/wwan0at1)
   --qmi <path>     modem QMI device           (default /dev/wwan0qmi0)

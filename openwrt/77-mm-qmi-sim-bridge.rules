@@ -1,6 +1,6 @@
-# at-qmi-bridge owns wwan0at1. ModemManager manages the modem over QMI, but
+# qmi-sim-bridge owns wwan0at1. ModemManager manages the modem over QMI, but
 # also probes every AT port at startup; two readers on one wwan AT port steal
 # each other's replies (MM: "port wwan0at1 timed out"; gsm-sip-bridge: its
 # one-shot modem-ims check fails and VoWiFi stays off for the run).
-# Install as /lib/udev/rules.d/77-mm-at-qmi-bridge.rules, then restart ModemManager.
+# Install as /lib/udev/rules.d/77-mm-qmi-sim-bridge.rules, then restart ModemManager.
 KERNEL=="wwan0at1", ENV{ID_MM_PORT_IGNORE}="1"

@@ -1,4 +1,4 @@
-# gsm-sip-bridge: VoWiFi line on the stick's own SIM via at-qmi-bridge's PC/SC
+# gsm-sip-bridge: VoWiFi line on the stick's own SIM via qmi-sim-bridge's PC/SC
 # mode (pcscd vpcd reader "QMI SIM", port 15963), SIP server mode.
 # Secrets come from .env (env:VAR).
 
@@ -22,7 +22,7 @@ enabled = true
 [[vowifi.line]]
 pcsc_reader = true
 # Pin the PLMN so supervise doesn't read it from the card in the instant after
-# it starts pcscd, before at-qmi-bridge has connected to the reader
+# it starts pcscd, before qmi-sim-bridge has connected to the reader
 # ("FATAL: could not derive MCC/MNC; skipping this line"). EF_AD decides 2 vs 3
 # MNC digits; 3GPP FQDNs (ePDG, IMS realm) need it zero-padded to 3 digits as
 # written here, e.g. Vi India 404 / "043" — "43" builds epdg.epc.mnc43… which

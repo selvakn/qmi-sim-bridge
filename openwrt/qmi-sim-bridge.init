@@ -1,15 +1,15 @@
 #!/bin/sh /etc/rc.common
-# procd service for at-qmi-bridge. Install as /etc/init.d/at-qmi-bridge.
-# Options come from uci: at-qmi-bridge.main.{at,qmi,link,slot,aid,trace,vpcd}
+# procd service for qmi-sim-bridge. Install as /etc/init.d/qmi-sim-bridge.
+# Options come from uci: qmi-sim-bridge.main.{at,qmi,link,slot,aid,trace,vpcd}
 # Setting vpcd (host:port) selects PC/SC mode; at/link are then unused.
 
 START=96
 STOP=10
 USE_PROCD=1
-PROG=/usr/sbin/at-qmi-bridge
+PROG=/usr/sbin/qmi-sim-bridge
 
 start_service() {
-	config_load at-qmi-bridge
+	config_load qmi-sim-bridge
 	local enabled at qmi link slot aid trace vpcd
 	config_get_bool enabled main enabled 1
 	[ "$enabled" = 1 ] || return 0
